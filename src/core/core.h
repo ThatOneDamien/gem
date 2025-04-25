@@ -12,7 +12,7 @@
     #include <signal.h>
     #define GEM_ERROR(msg) { fprintf(stderr, msg); raise(SIGTRAP); }
     #define GEM_ERROR_ARGS(msg, ...) { fprintf(stderr, msg, __VA_ARGS__); raise(SIGTRAP); }
-    #define GEM_ASSERT(cond) { if(!cond) { GEM_ERROR_ARGS("Assertion failed: %s", #cond) } }
+    #define GEM_ASSERT(cond) { if(!(cond)) { GEM_ERROR_ARGS("Assertion failed: %s\n", #cond) } }
     #define GEM_ASSERT_MSG(cond, msg) { if(!(cond)) { GEM_ERROR(msg) } }
     #define GEM_ASSERT_ARGS(cond, msg, ...) { if(!(cond)) { GEM_ERROR_ARGS(msg, __VA_ARGS__) } }
 #else
@@ -23,6 +23,6 @@
     #define GEM_ASSERT_ARGS(cond, msg, ...) cond;
 #endif
 
-#define GEM_ENSURE(cond) { if(!cond) { GEM_ERROR_ARGS("Ensure failed: %s", #cond) exit(EXIT_FAILURE); } }
+#define GEM_ENSURE(cond) { if(!(cond)) { GEM_ERROR_ARGS("Ensure failed: %s\n", #cond) exit(EXIT_FAILURE); } }
 #define GEM_ENSURE_MSG(cond, msg) { if(!(cond)) { GEM_ERROR(msg) exit(EXIT_FAILURE); } }
 #define GEM_ENSURE_ARGS(cond, msg, ...) { if(!(cond)) { GEM_ERROR_ARGS(msg, __VA_ARGS__) exit(EXIT_FAILURE); } }

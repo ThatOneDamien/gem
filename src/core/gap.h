@@ -1,0 +1,21 @@
+#pragma once
+
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
+typedef struct _GapBuffer* GapBuffer;
+
+GapBuffer gap_create(size_t initial_capacity);
+void gap_free(GapBuffer buf);
+
+size_t gap_ensure_cap(GapBuffer buf, size_t new_capacity);
+char gap_get_pos(GapBuffer buf, size_t pos);
+void gap_append(GapBuffer buf, const char* data, size_t size);
+void gap_set_gap(GapBuffer buf, size_t new_gap_pos);
+void gap_move_gap(GapBuffer buf, int64_t relative_offset);
+void gap_del_back(GapBuffer buf, size_t count);
+void gap_del_forw(GapBuffer buf, size_t count);
+
+void gap_print_buffer(GapBuffer buf);
+static inline void gap_append_str(GapBuffer buf, const char* str) { gap_append(buf, str, strlen(str)); }
