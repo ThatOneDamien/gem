@@ -1,7 +1,7 @@
 CC     = clang
-CFLAGS := -Wall -Wextra -Werror -pedantic -std=c99 $(shell pkg-config --cflags glfw3)
-LIBS   := $(shell pkg-config --static --libs glfw3)
-INC    = -Isrc -Idependencies/glad/include
+CFLAGS := -Wall -Wextra -Werror -pedantic -std=c99 $(shell pkg-config --cflags glfw3 freetype2)
+LIBS   := $(shell pkg-config --static --libs glfw3 freetype2)
+INC    = -Isrc -Idependencies/glad/include -Idependencies/stb_image -Idependencies/cglm/include
 
 BUILD_DIR ?= build
 INT_DIR   := $(BUILD_DIR)/int
@@ -22,11 +22,11 @@ all: debug release
 clean:
 	rm -rf build
 
-$(BUILD_DIR)/gemdb: $(DEBUG_OBJS) $(INT_DIR)/dependencies/glad.o
+$(BUILD_DIR)/gemdb: $(DEBUG_OBJS) $(INT_DIR)/dependencies/glad.o $(INT_DIR)/dependencies/stb_image.o
 	@$(CC) $(CFLAGS) $(INC) $(LIBS) -DGEM_DEBUG -ggdb -o $@ $^
 	@echo 'Linking gem (debug)'
 
-$(BUILD_DIR)/gem: $(RELEASE_OBJS) $(INT_DIR)/dependencies/glad.o
+$(BUILD_DIR)/gem: $(RELEASE_OBJS) $(INT_DIR)/dependencies/glad.o $(INT_DIR)/dependencies/stb_image.o
 	@$(CC) $(CFLAGS) $(INC) -O3 -o $@ $^
 	@echo 'Linking gem (release)'
 
@@ -43,4 +43,9 @@ $(RELEASE_OBJS): $(INT_DIR)/release/%.o: $(SRC_DIR)/%.c
 $(INT_DIR)/dependencies/glad.o: dependencies/glad/src/glad.c
 	@mkdir -p $(dir $@)
 	@echo 'Making glad.o'
-	@$(CC) $(CFLAGS) $(INC) -O3 -o $@ -c $<
+	@$(CC) $(INC) -O3 -o $@ -c $<
+
+$(INT_DIR)/dependencies/stb_image.o: dependencies/stb_image/stb_image.c
+	@mkdir -p $(dir $@)
+	@echo 'Making stb_image.o'
+	@$(CC) $(INC) -O3 -o $@ -c $<

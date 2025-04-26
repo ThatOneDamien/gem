@@ -1,8 +1,12 @@
 #include "renderer.h"
 #include "core/core.h"
 #include "file/file.h"
+#include "font.h"
 
 #include <glad/glad.h>
+
+#include <cglm/cglm.h>
+#include <cglm/clipspace/ortho_rh_no.h>
 
 #include <string.h>
 
@@ -12,17 +16,22 @@
 
 #define TEXT_VERT_SHADER "assets/shaders/basic.vert"
 #define TEXT_FRAG_SHADER "assets/shaders/basic.frag"
+#define DEFAULT_FONT     "assets/fonts/JetBrainsMono-Regular.ttf"
 
 typedef struct
 {
-    float x, y;
+    vec2 position;
+    vec2 tex_coords;
 } TextVertex;
 
 static GLuint s_VAO;
 static GLuint s_VBO;
 static GLuint s_IBO;
 static GLuint s_Shader;
+static GLuint s_FontAtlas;
+static GemFont s_FontData;
 static TextVertex* s_VertexData;
+static TextVertex* s_VertexInsert;
 
 static bool create_shader_program(const char* vert_path, const char* frag_path, GLuint* program_id);
 static APIENTRY void debugCallbackFunc(GLenum, GLenum, GLuint, GLenum, GLsizei, const GLchar*,
@@ -42,24 +51,28 @@ void gem_renderer_init(void)
 
     glBindVertexArray(s_VAO);
     glBindBuffer(GL_ARRAY_BUFFER, s_VBO);
-    // glBufferData(GL_ARRAY_BUFFER, 0, NULL, GL_DYNAMIC_DRAW);
-    TextVertex vertices[3] = {
-        { -0.5f, -0.5f },
-        {  0.5f, -0.5f },
-        {  0.0f,  0.5f }
-    };
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-    
+    glBufferData(GL_ARRAY_BUFFER, sizeof(TextVertex) * MAX_VERTICES, NULL, GL_DYNAMIC_DRAW);
+    // TextVertex vertices[4] = {
+    //     {  { 300.0f, 100.0f }, { 0.0f, 1.0f } },
+    //     {  { 600.0f, 100.0f }, { 1.0f, 1.0f } },
+    //     {  { 600.0f, 400.0f }, { 1.0f, 0.0f } },
+    //     {  { 300.0f, 400.0f }, { 0.0f, 0.0f } }
+    // };
+    // glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_IBO);
 
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(TextVertex), (const void*)0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(TextVertex), (const void*)(sizeof(float) * 2));
     glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
 
     bool result = create_shader_program(TEXT_VERT_SHADER, TEXT_FRAG_SHADER, &s_Shader);
-    GEM_ENSURE_MSG(result, "Failed to create text shader, exiting.\n");
+    GEM_ENSURE_MSG(result, "Failed to create text shader, exiting.");
     glUseProgram(s_Shader);
 
     s_VertexData = malloc(sizeof(TextVertex) * MAX_VERTICES);
+    s_VertexInsert = s_VertexData;
 
     {
         uint32_t indices[INDEX_COUNT];
@@ -76,16 +89,73 @@ void gem_renderer_init(void)
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
     }
 
+    result = gem_gen_font_atlas(DEFAULT_FONT, &s_FontData, &s_FontAtlas);
+    GEM_ENSURE_MSG(result, "Failed to create font atlas.");
+    glBindTextureUnit(0, s_FontAtlas);
+    glUniform1i(glGetUniformLocation(s_Shader, "u_Tex"), 0);
+    mat4 cam;
+    glm_ortho_rh_no(0.0f, 1080.0f, 0.0f, 720.0f, -1.0f, 1.0f, cam);
+    glUniformMatrix4fv(glGetUniformLocation(s_Shader, "u_Cam"), 1, GL_FALSE, &cam[0][0]);
+
+
+    GEM_ENSURE_ARGS(result, "Failed to create font at path %s.", DEFAULT_FONT);
 }
 
-void draw_som(void) 
+void draw_som(UNUSED const char* text) 
 {
+    s_VertexInsert = s_VertexData;
+    // glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, NULL);
+    float pen_X = 10.0f, pen_Y = 710.f - (float)GEM_FONT_SIZE;
+    for(const char* p = text; *p; ++p)
+    {
+        char c = *p;
+        if(c != ' ' && c != '\n')
+        {
+            int index = (int)c - GEM_PRINTABLE_ASCII_START + 1;
+            GemGlyphData* data = &s_FontData.glyphs[index];
+            // printf("%c - %f %f %f %f\t\t%u %u\t\t%u %u\n", c, data->tex_minX, data->tex_minY, data->tex_maxX, data->tex_maxY, data->xoff, data->yoff, data->width, data->height);
+            printf("%c\n", data->c);
+            s_VertexInsert[0].position[0] = pen_X + data->xoff;
+            s_VertexInsert[0].position[1] = pen_Y + data->yoff - data->height;
+            s_VertexInsert[0].tex_coords[0] = data->tex_minX;
+            s_VertexInsert[0].tex_coords[1] = data->tex_maxY;
+            // s_VertexInsert[0].tex_coords[0] = 0.0f;
+            // s_VertexInsert[0].tex_coords[1] = 1.0f;
+
+            s_VertexInsert[1].position[0] = pen_X + data->xoff + data->width;
+            s_VertexInsert[1].position[1] = pen_Y + data->yoff - data->height;
+            s_VertexInsert[1].tex_coords[0] = data->tex_maxX;
+            s_VertexInsert[1].tex_coords[1] = data->tex_maxY;
+            // s_VertexInsert[1].tex_coords[0] = 1.0f;
+            // s_VertexInsert[1].tex_coords[1] = 1.0f;
+
+            s_VertexInsert[2].position[0] = pen_X + data->xoff + data->width;
+            s_VertexInsert[2].position[1] = pen_Y + data->yoff;
+            s_VertexInsert[2].tex_coords[0] = data->tex_maxX;
+            s_VertexInsert[2].tex_coords[1] = data->tex_minY;
+            // s_VertexInsert[2].tex_coords[0] = 1.0f;
+            // s_VertexInsert[2].tex_coords[1] = 0.0f;
+
+            s_VertexInsert[3].position[0] = pen_X + data->xoff;
+            s_VertexInsert[3].position[1] = pen_Y + data->yoff;
+            s_VertexInsert[3].tex_coords[0] = data->tex_minX;
+            s_VertexInsert[3].tex_coords[1] = data->tex_minY;
+            // s_VertexInsert[3].tex_coords[0] = 0.0f;
+            // s_VertexInsert[3].tex_coords[1] = 0.0f;
+            
+            s_VertexInsert += 4;
+        }
+        pen_X += s_FontData.advance;
+    }
+    glBufferSubData(GL_ARRAY_BUFFER, 0, (uintptr_t)s_VertexInsert - (uintptr_t)s_VertexData, s_VertexData);
+    glDrawElements(GL_TRIANGLES, ((uintptr_t)s_VertexInsert - (uintptr_t)s_VertexData) / sizeof(TextVertex) / 4 * 6, GL_UNSIGNED_INT, NULL);
 }
 
 void gem_renderer_cleanup(void)
 {
     free(s_VertexData);
     glDeleteProgram(s_Shader);
+    glDeleteTextures(1, &s_FontAtlas);
     glDeleteBuffers(1, &s_VBO);
     glDeleteBuffers(1, &s_IBO);
     glDeleteVertexArrays(1, &s_VAO);
@@ -109,7 +179,7 @@ static bool create_shader_program(const char* vert_path, const char* frag_path, 
     if(!status)
     {
         glDeleteShader(vert);
-        GEM_ERROR_ARGS("Failed to compile vertex shader at path %s.\n", vert_path);
+        GEM_ERROR_ARGS("Failed to compile vertex shader at path %s.", vert_path);
         return false;
     }
 
@@ -124,7 +194,7 @@ static bool create_shader_program(const char* vert_path, const char* frag_path, 
     {
         glDeleteShader(vert);
         glDeleteShader(frag);
-        GEM_ERROR_ARGS("Failed to compile fragment shader at path %s.\n", frag_path);
+        GEM_ERROR_ARGS("Failed to compile fragment shader at path %s.", frag_path);
         return false;
     }
 
@@ -143,7 +213,7 @@ static bool create_shader_program(const char* vert_path, const char* frag_path, 
     if(!status)
     {
         glDeleteProgram(program);
-        GEM_ERROR("Failed to link shader program.\n");
+        GEM_ERROR("Failed to link shader program.");
         return false;
     }
 
@@ -158,13 +228,13 @@ static APIENTRY void debugCallbackFunc(UNUSED GLenum source, UNUSED GLenum type,
     switch(severity)
     {
     case GL_DEBUG_SEVERITY_LOW:
-        fprintf(stderr, "OpenGL Warning: %s\n", message);
+        fprintf(stderr, "\033[33mOpenGL Warning: %s\033[0m\n", message);
         break;
     case GL_DEBUG_SEVERITY_MEDIUM:
-        GEM_ERROR_ARGS("OpenGL Error: %s\n", message);
+        GEM_ERROR_ARGS("OpenGL Error: %s", message);
         break;
     case GL_DEBUG_SEVERITY_HIGH:
-        GEM_ERROR_ARGS("OpenGL Critical Error: %s\n", message);
+        GEM_ERROR_ARGS("OpenGL Critical Error: %s", message);
         break;
     }
 }

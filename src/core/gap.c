@@ -112,6 +112,7 @@ void gap_del_forw(GapBuffer buf, size_t count)
 
 void gap_print_buffer(GapBuffer buf)
 {
+    GEM_ASSERT(buf != NULL);
     puts("Before Gap\n--------------------");
     for(size_t i = 0; i < buf->gap_pos; ++i)
         putc(buf->data[i], stdout);
