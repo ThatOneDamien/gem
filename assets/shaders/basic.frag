@@ -1,4 +1,5 @@
 #version 450 core
+precision highp float;
 
 layout(location = 0) out vec4 o_Color;
 

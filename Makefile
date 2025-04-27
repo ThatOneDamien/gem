@@ -8,10 +8,11 @@ INT_DIR   := $(BUILD_DIR)/int
 SRC_DIR   =  src
 
 SRCS := $(shell find $(SRC_DIR) -name "*.c")
+HEADERS := $(shell find $(SRC_DIR) -name "*.h")
 DEBUG_OBJS := $(patsubst $(SRC_DIR)/%.c, $(INT_DIR)/debug/%.o, $(SRCS))
 RELEASE_OBJS := $(patsubst $(SRC_DIR)/%.c, $(INT_DIR)/release/%.o, $(SRCS))
 
-.PHONY: all debug release clean
+.PHONY: all debug release clean 
 
 debug: $(BUILD_DIR)/gemdb
 
@@ -22,20 +23,21 @@ all: debug release
 clean:
 	rm -rf build
 
-$(BUILD_DIR)/gemdb: $(DEBUG_OBJS) $(INT_DIR)/dependencies/glad.o $(INT_DIR)/dependencies/stb_image.o
-	@$(CC) $(CFLAGS) $(INC) $(LIBS) -DGEM_DEBUG -ggdb -o $@ $^
+
+$(BUILD_DIR)/gemdb: $(DEBUG_OBJS) $(INT_DIR)/dependencies/glad.o $(INT_DIR)/dependencies/stb_image.o 
 	@echo 'Linking gem (debug)'
+	@$(CC) $(CFLAGS) $(INC) $(LIBS) -DGEM_DEBUG -ggdb -o $@ $^
 
 $(BUILD_DIR)/gem: $(RELEASE_OBJS) $(INT_DIR)/dependencies/glad.o $(INT_DIR)/dependencies/stb_image.o
-	@$(CC) $(CFLAGS) $(INC) -O3 -o $@ $^
 	@echo 'Linking gem (release)'
+	@$(CC) $(CFLAGS) $(INC) $(LIBS) -O3 -o $@ $^
 
-$(DEBUG_OBJS): $(INT_DIR)/debug/%.o: $(SRC_DIR)/%.c
+$(DEBUG_OBJS): $(INT_DIR)/debug/%.o: $(SRC_DIR)/%.c $(HEADERS)
 	@mkdir -p $(dir $@)
 	@echo 'Making $@ (debug)'
 	@$(CC) $(CFLAGS) $(INC) -DGEM_DEBUG -ggdb -o $@ -c $<
 
-$(RELEASE_OBJS): $(INT_DIR)/release/%.o: $(SRC_DIR)/%.c
+$(RELEASE_OBJS): $(INT_DIR)/release/%.o: $(SRC_DIR)/%.c $(HEADERS)
 	@mkdir -p $(dir $@)
 	@echo 'Making $@ (release)'
 	@$(CC) $(CFLAGS) $(INC) -O3 -o $@ -c $<
@@ -43,9 +45,9 @@ $(RELEASE_OBJS): $(INT_DIR)/release/%.o: $(SRC_DIR)/%.c
 $(INT_DIR)/dependencies/glad.o: dependencies/glad/src/glad.c
 	@mkdir -p $(dir $@)
 	@echo 'Making glad.o'
-	@$(CC) $(INC) -O3 -o $@ -c $<
+	@$(CC) -Idependencies/glad/include -O3 -o $@ -c $<
 
 $(INT_DIR)/dependencies/stb_image.o: dependencies/stb_image/stb_image.c
 	@mkdir -p $(dir $@)
 	@echo 'Making stb_image.o'
-	@$(CC) $(INC) -O3 -o $@ -c $<
+	@$(CC) -Idependencies/std_image -O3 -o $@ -c $<

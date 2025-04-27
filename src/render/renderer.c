@@ -113,35 +113,25 @@ void draw_som(UNUSED const char* text)
         {
             int index = (int)c - GEM_PRINTABLE_ASCII_START + 1;
             GemGlyphData* data = &s_FontData.glyphs[index];
-            // printf("%c - %f %f %f %f\t\t%u %u\t\t%u %u\n", c, data->tex_minX, data->tex_minY, data->tex_maxX, data->tex_maxY, data->xoff, data->yoff, data->width, data->height);
-            printf("%c\n", data->c);
             s_VertexInsert[0].position[0] = pen_X + data->xoff;
             s_VertexInsert[0].position[1] = pen_Y + data->yoff - data->height;
             s_VertexInsert[0].tex_coords[0] = data->tex_minX;
-            s_VertexInsert[0].tex_coords[1] = data->tex_maxY;
-            // s_VertexInsert[0].tex_coords[0] = 0.0f;
-            // s_VertexInsert[0].tex_coords[1] = 1.0f;
+            s_VertexInsert[0].tex_coords[1] = data->tex_minY;
 
             s_VertexInsert[1].position[0] = pen_X + data->xoff + data->width;
             s_VertexInsert[1].position[1] = pen_Y + data->yoff - data->height;
             s_VertexInsert[1].tex_coords[0] = data->tex_maxX;
-            s_VertexInsert[1].tex_coords[1] = data->tex_maxY;
-            // s_VertexInsert[1].tex_coords[0] = 1.0f;
-            // s_VertexInsert[1].tex_coords[1] = 1.0f;
+            s_VertexInsert[1].tex_coords[1] = data->tex_minY;
 
             s_VertexInsert[2].position[0] = pen_X + data->xoff + data->width;
             s_VertexInsert[2].position[1] = pen_Y + data->yoff;
             s_VertexInsert[2].tex_coords[0] = data->tex_maxX;
-            s_VertexInsert[2].tex_coords[1] = data->tex_minY;
-            // s_VertexInsert[2].tex_coords[0] = 1.0f;
-            // s_VertexInsert[2].tex_coords[1] = 0.0f;
+            s_VertexInsert[2].tex_coords[1] = data->tex_maxY;
 
             s_VertexInsert[3].position[0] = pen_X + data->xoff;
             s_VertexInsert[3].position[1] = pen_Y + data->yoff;
             s_VertexInsert[3].tex_coords[0] = data->tex_minX;
-            s_VertexInsert[3].tex_coords[1] = data->tex_minY;
-            // s_VertexInsert[3].tex_coords[0] = 0.0f;
-            // s_VertexInsert[3].tex_coords[1] = 0.0f;
+            s_VertexInsert[3].tex_coords[1] = data->tex_maxY;
             
             s_VertexInsert += 4;
         }

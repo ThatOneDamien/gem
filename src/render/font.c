@@ -22,6 +22,31 @@ void gem_freetype_init(void)
     GEM_ENSURE_ARGS(err == FT_Err_Ok, "Freetype initialization failed (error code: %d).", err);
 }
 
+static bool get_cell_dims(FT_Face face, FT_Int32 load_flags, size_t* width, size_t* height)
+{
+    *width = 0;
+    *height = 0;
+    FT_Error err = FT_Load_Glyph(face, 0, load_flags);
+    if(err != FT_Err_Ok)
+        return false;
+
+    *width = face->glyph->bitmap.width;
+    *height = face->glyph->bitmap.rows;
+
+    for(size_t i = GEM_PRINTABLE_ASCII_START; i < GEM_PRINTABLE_ASCII_END; ++i)
+    {
+        err = FT_Load_Char(face, i, load_flags);
+        if(err != FT_Err_Ok)
+            continue;
+        if(*width < face->glyph->bitmap.width)
+            *width = face->glyph->bitmap.width;
+        if(*height < face->glyph->bitmap.rows)
+            *height = face->glyph->bitmap.rows;
+    }
+
+    return true;
+}
+
 bool gem_gen_font_atlas(const char* font_path, GemFont* font, GLuint* font_texture_id)
 {
     GEM_ASSERT(font_path != NULL);
@@ -35,12 +60,20 @@ bool gem_gen_font_atlas(const char* font_path, GemFont* font, GLuint* font_textu
     if(err != FT_Err_Ok)
         return false;
 
-    FT_Int32 load_flags = FT_LOAD_DEFAULT | FT_LOAD_FORCE_AUTOHINT | FT_LOAD_TARGET_LIGHT;
-    FT_Int32 render_flags = FT_RENDER_MODE_NORMAL;
+    const FT_Int32 load_flags = FT_LOAD_DEFAULT | FT_LOAD_FORCE_AUTOHINT | FT_LOAD_TARGET_LIGHT;
+    const FT_Int32 render_flags = FT_RENDER_MODE_NORMAL;
 
-    size_t tex_width = ATLAS_COLUMNS * (GEM_FONT_SIZE + 1) + 10;
-    size_t tex_height = ATLAS_ROWS * (GEM_FONT_SIZE + 1) + 10;
+    size_t cell_width, cell_height;
+    if(!get_cell_dims(face, load_flags, &cell_width, &cell_height))
+        return false;
+    cell_width += 1; // Padding
+    cell_height += 1;
+    size_t tex_width = ATLAS_COLUMNS * cell_width + ATLAS_OFFSET;
+    size_t tex_height = ATLAS_ROWS * cell_height + ATLAS_OFFSET;
+
+
     uint8_t* pixels = calloc(tex_width * tex_height, 1);
+    GEM_ENSURE(pixels != NULL);
 
     // Load the 'missing glyph' glyph
     err = FT_Load_Glyph(face, 0, load_flags);
@@ -53,9 +86,9 @@ bool gem_gen_font_atlas(const char* font_path, GemFont* font, GLuint* font_textu
     FT_Bitmap* bmp = &face->glyph->bitmap;
     font->glyphs[0] = (GemGlyphData) {
         .tex_minX = (float)ATLAS_OFFSET / (float)tex_width,
-        .tex_minY = (float)(tex_height - (ATLAS_OFFSET + bmp->rows)) / (float)tex_height,
+        .tex_minY = (float)(ATLAS_OFFSET + bmp->rows) / (float)tex_height,
         .tex_maxX = (float)(ATLAS_OFFSET + bmp->width) / (float)tex_width,
-        .tex_maxY = (float)(tex_height - ATLAS_OFFSET) / (float)tex_height,
+        .tex_maxY = (float)ATLAS_OFFSET / (float)tex_height,
         .width = bmp->width,
         .height = bmp->rows,
         .xoff = face->glyph->bitmap_left,
@@ -76,20 +109,19 @@ bool gem_gen_font_atlas(const char* font_path, GemFont* font, GLuint* font_textu
             continue;
 
         bmp = &face->glyph->bitmap;
-        size_t xloc = (i % ATLAS_COLUMNS) * (GEM_FONT_SIZE + 1) + ATLAS_OFFSET;
-        size_t yloc = (i / ATLAS_COLUMNS) * (GEM_FONT_SIZE + 1) + ATLAS_OFFSET;
+        size_t xloc = (i % ATLAS_COLUMNS) * cell_width + ATLAS_OFFSET;
+        size_t yloc = (i / ATLAS_COLUMNS) * cell_height + ATLAS_OFFSET;
 
         font->glyphs[i] = (GemGlyphData) {
             .tex_minX = (float)xloc / (float)tex_width,
-            .tex_minY = (float)yloc / (float)tex_height,
+            .tex_minY = (float)(yloc + bmp->rows)/ (float)tex_height,
             .tex_maxX = (float)(xloc + bmp->width) / (float)tex_width,
-            .tex_maxY = (float)(yloc + bmp->rows)/ (float)tex_height,
+            .tex_maxY = (float)yloc / (float)tex_height,
             .width = bmp->width,
             .height = bmp->rows,
             .xoff = face->glyph->bitmap_left,
             .yoff = face->glyph->bitmap_top
         };
-        font->glyphs[i].c = (char)(i + GEM_PRINTABLE_ASCII_START - 1);
 
 		for(uint32_t row = 0; row < bmp->rows; ++row)
             memcpy(pixels + ((yloc + row) * tex_width + xloc), bmp->buffer + (row * bmp->pitch), bmp->width);

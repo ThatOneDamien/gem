@@ -42,9 +42,9 @@
 #else
     #define GEM_ERROR(msg)
     #define GEM_ERROR_ARGS(msg, ...)
-    #define GEM_ASSERT(cond)                cond;
-    #define GEM_ASSERT_MSG(cond, msg)       cond;
-    #define GEM_ASSERT_ARGS(cond, msg, ...) cond;
+    #define GEM_ASSERT(cond)
+    #define GEM_ASSERT_MSG(cond, msg)
+    #define GEM_ASSERT_ARGS(cond, msg, ...)
 #endif
 
 #define GEM_ENSURE(cond)                                                            \

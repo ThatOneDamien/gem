@@ -7,7 +7,7 @@
 #define GEM_PRINTABLE_ASCII_START 33
 #define GEM_PRINTABLE_ASCII_END   127
 #define GEM_GLYPH_CNT (GEM_PRINTABLE_ASCII_END - GEM_PRINTABLE_ASCII_START + 1)
-#define GEM_FONT_SIZE 64
+#define GEM_FONT_SIZE 32
 
 typedef struct
 {
@@ -15,9 +15,6 @@ typedef struct
     float tex_maxX, tex_maxY;
     uint32_t width, height;
     uint32_t xoff, yoff;
-#ifdef GEM_DEBUG
-    char c;
-#endif
 } GemGlyphData;
 
 typedef struct

@@ -31,7 +31,10 @@ int main(UNUSED int argc, UNUSED char** argv)
     while(!glfwWindowShouldClose(s_Window))
     {
         glClear(GL_COLOR_BUFFER_BIT);
-        draw_som("Hi.");
+        char c[GEM_GLYPH_CNT - 1];
+        for(size_t i = 0; i < GEM_GLYPH_CNT - 1; ++i)
+            c[i] = (char)(i + GEM_PRINTABLE_ASCII_START);
+        draw_som(c);
 
         glfwSwapBuffers(s_Window);
         glfwPollEvents();
