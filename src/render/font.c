@@ -9,9 +9,9 @@
 #include <glad/glad.h>
 
 // TODO: Change this to a dynamic system
-#define ATLAS_ROWS 8
+#define ATLAS_ROWS    8
 #define ATLAS_COLUMNS 12
-#define ATLAS_OFFSET 10
+#define ATLAS_OFFSET  10
 
 
 static FT_Library s_Library;
@@ -84,20 +84,20 @@ bool gem_gen_font_atlas(const char* font_path, GemFont* font, GLuint* font_textu
         return false;
 
     FT_Bitmap* bmp = &face->glyph->bitmap;
-    font->glyphs[0] = (GemGlyphData) {
-        .tex_minX = (float)ATLAS_OFFSET / (float)tex_width,
-        .tex_minY = (float)(ATLAS_OFFSET + bmp->rows) / (float)tex_height,
-        .tex_maxX = (float)(ATLAS_OFFSET + bmp->width) / (float)tex_width,
-        .tex_maxY = (float)ATLAS_OFFSET / (float)tex_height,
-        .width = bmp->width,
-        .height = bmp->rows,
-        .xoff = face->glyph->bitmap_left,
-        .yoff = face->glyph->bitmap_top
-    };
+    font->glyphs[0] =
+        (GemGlyphData) { .tex_minX = (float)ATLAS_OFFSET / (float)tex_width,
+                         .tex_minY = (float)(ATLAS_OFFSET + bmp->rows) / (float)tex_height,
+                         .tex_maxX = (float)(ATLAS_OFFSET + bmp->width) / (float)tex_width,
+                         .tex_maxY = (float)ATLAS_OFFSET / (float)tex_height,
+                         .width = bmp->width,
+                         .height = bmp->rows,
+                         .xoff = face->glyph->bitmap_left,
+                         .yoff = face->glyph->bitmap_top };
     font->advance = face->glyph->advance.x >> 6;
 
     for(uint32_t row = 0; row < bmp->rows; ++row)
-        memcpy(pixels + ((ATLAS_OFFSET + row) * tex_width + ATLAS_OFFSET), bmp->buffer + (row * bmp->pitch), bmp->width);
+        memcpy(pixels + ((ATLAS_OFFSET + row) * tex_width + ATLAS_OFFSET),
+               bmp->buffer + (row * bmp->pitch), bmp->width);
 
     for(size_t i = 1; i < GEM_GLYPH_CNT; ++i)
     {
@@ -112,23 +112,23 @@ bool gem_gen_font_atlas(const char* font_path, GemFont* font, GLuint* font_textu
         size_t xloc = (i % ATLAS_COLUMNS) * cell_width + ATLAS_OFFSET;
         size_t yloc = (i / ATLAS_COLUMNS) * cell_height + ATLAS_OFFSET;
 
-        font->glyphs[i] = (GemGlyphData) {
-            .tex_minX = (float)xloc / (float)tex_width,
-            .tex_minY = (float)(yloc + bmp->rows)/ (float)tex_height,
-            .tex_maxX = (float)(xloc + bmp->width) / (float)tex_width,
-            .tex_maxY = (float)yloc / (float)tex_height,
-            .width = bmp->width,
-            .height = bmp->rows,
-            .xoff = face->glyph->bitmap_left,
-            .yoff = face->glyph->bitmap_top
-        };
+        font->glyphs[i] =
+            (GemGlyphData) { .tex_minX = (float)xloc / (float)tex_width,
+                             .tex_minY = (float)(yloc + bmp->rows) / (float)tex_height,
+                             .tex_maxX = (float)(xloc + bmp->width) / (float)tex_width,
+                             .tex_maxY = (float)yloc / (float)tex_height,
+                             .width = bmp->width,
+                             .height = bmp->rows,
+                             .xoff = face->glyph->bitmap_left,
+                             .yoff = face->glyph->bitmap_top };
 
-		for(uint32_t row = 0; row < bmp->rows; ++row)
-            memcpy(pixels + ((yloc + row) * tex_width + xloc), bmp->buffer + (row * bmp->pitch), bmp->width);
+        for(uint32_t row = 0; row < bmp->rows; ++row)
+            memcpy(pixels + ((yloc + row) * tex_width + xloc), bmp->buffer + (row * bmp->pitch),
+                   bmp->width);
     }
 
     // stbi_write_bmp("test.bmp", tex_width, tex_height, 1, pixels);
-    
+
     GLuint tex;
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glCreateTextures(GL_TEXTURE_2D, 1, &tex);
@@ -140,7 +140,7 @@ bool gem_gen_font_atlas(const char* font_path, GemFont* font, GLuint* font_textu
     glTextureParameteri(tex, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTextureParameteri(tex, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    glTextureSubImage2D(tex, 0, 0, 0, tex_width, tex_height, GL_RED, GL_UNSIGNED_BYTE, pixels); 
+    glTextureSubImage2D(tex, 0, 0, 0, tex_width, tex_height, GL_RED, GL_UNSIGNED_BYTE, pixels);
     *font_texture_id = tex;
 
     free(pixels);

@@ -18,4 +18,7 @@ void gap_del_back(GapBuffer buf, size_t count);
 void gap_del_forw(GapBuffer buf, size_t count);
 
 void gap_print_buffer(GapBuffer buf);
-static inline void gap_append_str(GapBuffer buf, const char* str) { gap_append(buf, str, strlen(str)); }
+static inline void gap_append_str(GapBuffer buf, const char* str)
+{
+    gap_append(buf, str, strlen(str));
+}

@@ -2,6 +2,7 @@
 #include "core/core.h"
 #include "file/file.h"
 #include "font.h"
+#include "uniforms.h"
 
 #include <glad/glad.h>
 
@@ -34,13 +35,17 @@ static TextVertex* s_VertexData;
 static TextVertex* s_VertexInsert;
 
 static bool create_shader_program(const char* vert_path, const char* frag_path, GLuint* program_id);
+#ifdef GEM_DEBUG
 static APIENTRY void debugCallbackFunc(GLenum, GLenum, GLuint, GLenum, GLsizei, const GLchar*,
                                        const void*);
+#endif
 
 void gem_renderer_init(void)
 {
+#ifdef GEM_DEBUG
     glEnable(GL_DEBUG_OUTPUT);
     glDebugMessageCallback(debugCallbackFunc, NULL);
+#endif
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -63,7 +68,8 @@ void gem_renderer_init(void)
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_IBO);
 
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(TextVertex), (const void*)0);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(TextVertex), (const void*)(sizeof(float) * 2));
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(TextVertex),
+                          (const void*)(sizeof(float) * 2));
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
 
@@ -92,21 +98,18 @@ void gem_renderer_init(void)
     result = gem_gen_font_atlas(DEFAULT_FONT, &s_FontData, &s_FontAtlas);
     GEM_ENSURE_MSG(result, "Failed to create font atlas.");
     glBindTextureUnit(0, s_FontAtlas);
-    glUniform1i(glGetUniformLocation(s_Shader, "u_Tex"), 0);
-    mat4 cam;
-    glm_ortho_rh_no(0.0f, 1080.0f, 0.0f, 720.0f, -1.0f, 1.0f, cam);
-    glUniformMatrix4fv(glGetUniformLocation(s_Shader, "u_Cam"), 1, GL_FALSE, &cam[0][0]);
 
+    gem_uniforms_init();
 
     GEM_ENSURE_ARGS(result, "Failed to create font at path %s.", DEFAULT_FONT);
 }
 
-void draw_som(UNUSED const char* text) 
+void gem_draw_str(const char* str, const GemQuad* bounding_box)
 {
     s_VertexInsert = s_VertexData;
-    // glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, NULL);
-    float pen_X = 10.0f, pen_Y = 710.f - (float)GEM_FONT_SIZE;
-    for(const char* p = text; *p; ++p)
+    float pen_X = bounding_box->bottom_left[0] + 10.0f;
+    float pen_Y = bounding_box->top_right[1] - (float)GEM_FONT_SIZE;
+    for(const char* p = str; *p; ++p)
     {
         char c = *p;
         if(c != ' ' && c != '\n')
@@ -132,18 +135,23 @@ void draw_som(UNUSED const char* text)
             s_VertexInsert[3].position[1] = pen_Y + data->yoff;
             s_VertexInsert[3].tex_coords[0] = data->tex_minX;
             s_VertexInsert[3].tex_coords[1] = data->tex_maxY;
-            
+
             s_VertexInsert += 4;
         }
         pen_X += s_FontData.advance;
     }
-    glBufferSubData(GL_ARRAY_BUFFER, 0, (uintptr_t)s_VertexInsert - (uintptr_t)s_VertexData, s_VertexData);
-    glDrawElements(GL_TRIANGLES, ((uintptr_t)s_VertexInsert - (uintptr_t)s_VertexData) / sizeof(TextVertex) / 4 * 6, GL_UNSIGNED_INT, NULL);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, (uintptr_t)s_VertexInsert - (uintptr_t)s_VertexData,
+                    s_VertexData);
+    glDrawElements(GL_TRIANGLES,
+                   ((uintptr_t)s_VertexInsert - (uintptr_t)s_VertexData) / sizeof(TextVertex) / 4 *
+                       6,
+                   GL_UNSIGNED_INT, NULL);
 }
 
 void gem_renderer_cleanup(void)
 {
     free(s_VertexData);
+    gem_uniforms_cleanup();
     glDeleteProgram(s_Shader);
     glDeleteTextures(1, &s_FontAtlas);
     glDeleteBuffers(1, &s_VBO);
@@ -211,6 +219,7 @@ static bool create_shader_program(const char* vert_path, const char* frag_path, 
     return true;
 }
 
+#ifdef GEM_DEBUG
 static APIENTRY void debugCallbackFunc(UNUSED GLenum source, UNUSED GLenum type, UNUSED GLuint id,
                                        GLenum severity, UNUSED GLsizei length,
                                        const GLchar* message, UNUSED const void* userParam)
@@ -228,3 +237,4 @@ static APIENTRY void debugCallbackFunc(UNUSED GLenum source, UNUSED GLenum type,
         break;
     }
 }
+#endif

@@ -26,7 +26,7 @@ bool gem_read_entire_file(const char* path, char** src, size_t* size)
     if(fseek(fp, 0, SEEK_SET) != 0)
         goto end;
 
-    temp = malloc(*size + 1); 
+    temp = malloc(*size + 1);
     GEM_ENSURE(temp != NULL);
 
     if(fread(temp, 1, *size, fp) != *size)
@@ -39,7 +39,7 @@ bool gem_read_entire_file(const char* path, char** src, size_t* size)
     *src = temp;
     success = true;
 
-    end:
+end:
     fclose(fp);
     return success;
 }
