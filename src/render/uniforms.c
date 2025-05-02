@@ -24,6 +24,7 @@ void gem_set_projection(int width, int height)
     GEM_ASSERT(width > 0 && height > 0);
     glm_ortho_rh_no(0.0f, (float)width, 0.0f, (float)height, -1.0f, 1.0f, s_Uniforms.projection);
     glNamedBufferSubData(s_UBO, 0, sizeof(s_Uniforms), &s_Uniforms);
+    glViewport(0, 0, (GLsizei)width, (GLsizei)height);
 }
 
 void gem_uniforms_cleanup(void) { glDeleteBuffers(1, &s_UBO); }

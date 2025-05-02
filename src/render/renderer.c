@@ -17,7 +17,7 @@
 
 #define TEXT_VERT_SHADER "assets/shaders/basic.vert"
 #define TEXT_FRAG_SHADER "assets/shaders/basic.frag"
-#define DEFAULT_FONT     "assets/fonts/JetBrainsMono-Regular.ttf"
+#define DEFAULT_FONT     "assets/fonts/JetBrainsMono-SemiBold.ttf"
 
 typedef struct
 {
@@ -29,8 +29,7 @@ static GLuint s_VAO;
 static GLuint s_VBO;
 static GLuint s_IBO;
 static GLuint s_Shader;
-static GLuint s_FontAtlas;
-static GemFont s_FontData;
+static GemFont s_Font;
 static TextVertex* s_VertexData;
 static TextVertex* s_VertexInsert;
 
@@ -95,27 +94,47 @@ void gem_renderer_init(void)
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
     }
 
-    result = gem_gen_font_atlas(DEFAULT_FONT, &s_FontData, &s_FontAtlas);
+    result = gem_gen_font_atlas(DEFAULT_FONT, &s_Font);
     GEM_ENSURE_MSG(result, "Failed to create font atlas.");
-    glBindTextureUnit(0, s_FontAtlas);
+    glBindTextureUnit(0, s_Font.atlas_texture);
 
     gem_uniforms_init();
 
     GEM_ENSURE_ARGS(result, "Failed to create font at path %s.", DEFAULT_FONT);
 }
 
-void gem_draw_str(const char* str, const GemQuad* bounding_box)
+void gem_renderer_cleanup(void)
 {
+    free(s_VertexData);
+    gem_uniforms_cleanup();
+    glDeleteProgram(s_Shader);
+    glDeleteTextures(1, &s_Font.atlas_texture);
+    glDeleteBuffers(1, &s_VBO);
+    glDeleteBuffers(1, &s_IBO);
+    glDeleteVertexArrays(1, &s_VAO);
+}
+
+static const GemGlyphData* get_glyph_data_from_font(const GemFont* font, char c)
+{
+    size_t index = c >= GEM_PRINTABLE_ASCII_START && c < GEM_PRINTABLE_ASCII_END
+                       ? (size_t)c - GEM_PRINTABLE_ASCII_START + 1
+                       : 0;
+    return font->glyphs[index].width == 0 ? &font->glyphs[0] : &font->glyphs[index];
+}
+
+void gem_draw_str(const char* str, size_t count, const GemQuad* bounding_box)
+{
+    GEM_ASSERT(str != NULL);
+
     s_VertexInsert = s_VertexData;
     float pen_X = bounding_box->bottom_left[0] + 10.0f;
     float pen_Y = bounding_box->top_right[1] - (float)GEM_FONT_SIZE;
-    for(const char* p = str; *p; ++p)
+    for(size_t i = 0; (count && i < count) || (!count && str[i]); ++i)
     {
-        char c = *p;
+        char c = str[i];
         if(c != ' ' && c != '\n')
         {
-            int index = (int)c - GEM_PRINTABLE_ASCII_START + 1;
-            GemGlyphData* data = &s_FontData.glyphs[index];
+            const GemGlyphData* data = get_glyph_data_from_font(&s_Font, c);
             s_VertexInsert[0].position[0] = pen_X + data->xoff;
             s_VertexInsert[0].position[1] = pen_Y + data->yoff - data->height;
             s_VertexInsert[0].tex_coords[0] = data->tex_minX;
@@ -138,7 +157,7 @@ void gem_draw_str(const char* str, const GemQuad* bounding_box)
 
             s_VertexInsert += 4;
         }
-        pen_X += s_FontData.advance;
+        pen_X += s_Font.advance;
     }
     glBufferSubData(GL_ARRAY_BUFFER, 0, (uintptr_t)s_VertexInsert - (uintptr_t)s_VertexData,
                     s_VertexData);
@@ -147,17 +166,52 @@ void gem_draw_str(const char* str, const GemQuad* bounding_box)
                        6,
                    GL_UNSIGNED_INT, NULL);
 }
+//
+// void gem_draw_buffer(GapBuffer buf, const GemQuad* bounding_box)
+// {
+//     GEM_ASSERT(buf != NULL);
+//
+//     s_VertexInsert = s_VertexData;
+//     float pen_X = bounding_box->bottom_left[0] + 10.0f;
+//     float pen_Y = bounding_box->top_right[1] - (float)GEM_FONT_SIZE;
+//     for(size_t i = 0; (count && i < count) || (!count && str[i]); ++i)
+//     {
+//         char c = str[i];
+//         if(c != ' ' && c != '\n')
+//         {
+//             const GemGlyphData* data = get_glyph_data_from_font(&s_Font, c);
+//             s_VertexInsert[0].position[0] = pen_X + data->xoff;
+//             s_VertexInsert[0].position[1] = pen_Y + data->yoff - data->height;
+//             s_VertexInsert[0].tex_coords[0] = data->tex_minX;
+//             s_VertexInsert[0].tex_coords[1] = data->tex_minY;
+//
+//             s_VertexInsert[1].position[0] = pen_X + data->xoff + data->width;
+//             s_VertexInsert[1].position[1] = pen_Y + data->yoff - data->height;
+//             s_VertexInsert[1].tex_coords[0] = data->tex_maxX;
+//             s_VertexInsert[1].tex_coords[1] = data->tex_minY;
+//
+//             s_VertexInsert[2].position[0] = pen_X + data->xoff + data->width;
+//             s_VertexInsert[2].position[1] = pen_Y + data->yoff;
+//             s_VertexInsert[2].tex_coords[0] = data->tex_maxX;
+//             s_VertexInsert[2].tex_coords[1] = data->tex_maxY;
+//
+//             s_VertexInsert[3].position[0] = pen_X + data->xoff;
+//             s_VertexInsert[3].position[1] = pen_Y + data->yoff;
+//             s_VertexInsert[3].tex_coords[0] = data->tex_minX;
+//             s_VertexInsert[3].tex_coords[1] = data->tex_maxY;
+//
+//             s_VertexInsert += 4;
+//         }
+//         pen_X += s_Font.advance;
+//     }
+//     glBufferSubData(GL_ARRAY_BUFFER, 0, (uintptr_t)s_VertexInsert - (uintptr_t)s_VertexData,
+//                     s_VertexData);
+//     glDrawElements(GL_TRIANGLES,
+//                    ((uintptr_t)s_VertexInsert - (uintptr_t)s_VertexData) / sizeof(TextVertex) / 4 *
+//                        6,
+//                    GL_UNSIGNED_INT, NULL);
+// }
 
-void gem_renderer_cleanup(void)
-{
-    free(s_VertexData);
-    gem_uniforms_cleanup();
-    glDeleteProgram(s_Shader);
-    glDeleteTextures(1, &s_FontAtlas);
-    glDeleteBuffers(1, &s_VBO);
-    glDeleteBuffers(1, &s_IBO);
-    glDeleteVertexArrays(1, &s_VAO);
-}
 
 static bool create_shader_program(const char* vert_path, const char* frag_path, GLuint* program_id)
 {

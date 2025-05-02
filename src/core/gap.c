@@ -9,11 +9,13 @@ typedef struct _GapBuffer
     size_t gap_pos;
 } _GapBuffer;
 
+
 GapBuffer gap_create(size_t initial_capacity)
 {
     GapBuffer buf = malloc(sizeof(_GapBuffer));
     GEM_ENSURE(buf != NULL);
-
+    
+    // This is a comment
     buf->size = 0;
     buf->capacity = initial_capacity > 10 ? initial_capacity : 10;
     buf->gap_pos = 0;
@@ -41,11 +43,6 @@ size_t gap_ensure_cap(GapBuffer buf, size_t new_capacity)
     return new_capacity;
 }
 
-char gap_get_pos(GapBuffer buf, size_t pos)
-{
-    GEM_ASSERT(buf != NULL);
-    return pos < buf->gap_pos ? buf->data[pos] : buf->data[buf->capacity - buf->size + pos];
-}
 
 void gap_append(GapBuffer buf, const char* data, size_t size)
 {
@@ -108,6 +105,30 @@ void gap_del_forw(GapBuffer buf, size_t count)
     if(count == 0)
         return;
     buf->size = count > buf->size ? 0 : buf->size - count;
+}
+
+size_t gap_get_size(GapBuffer buf)
+{
+    GEM_ASSERT(buf != NULL);
+    return buf->size;
+}
+
+size_t gap_get_gap_pos(GapBuffer buf)
+{
+    GEM_ASSERT(buf != NULL);
+    return buf->gap_pos;
+}
+
+char* gap_get_data(GapBuffer buf)
+{
+    GEM_ASSERT(buf != NULL);
+    return buf->data;
+}
+
+char gap_char_at(GapBuffer buf, size_t pos)
+{
+    GEM_ASSERT(buf != NULL);
+    return pos < buf->gap_pos ? buf->data[pos] : buf->data[buf->capacity - buf->size + pos];
 }
 
 void gap_print_buffer(GapBuffer buf)
