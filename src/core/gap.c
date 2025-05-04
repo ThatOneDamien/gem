@@ -39,7 +39,15 @@ size_t gap_ensure_cap(GapBuffer buf, size_t new_capacity)
 
     buf->data = realloc(buf->data, new_capacity);
     GEM_ENSURE(buf->data != NULL);
+    size_t diff = new_capacity - buf->capacity;
+    size_t data_size = buf->size - buf->gap_pos;
+
+    if(diff >= ((data_size + 1) >> 1))
+        memcpy(buf->data + new_capacity - data_size, buf->data + buf->capacity - data_size, data_size);
+    else
+        memmove(buf->data + new_capacity - data_size, buf->data + buf->capacity - data_size, data_size);
     buf->capacity = new_capacity;
+    printf("New Capacity: %lu\n", buf->capacity);
     return new_capacity;
 }
 
@@ -86,7 +94,8 @@ void gap_move_gap(GapBuffer buf, int64_t relative_offset)
     if(relative_offset == 0)
         return;
     size_t new_pos = (size_t)relative_offset + buf->gap_pos;
-    GEM_ASSERT(new_pos <= buf->size);
+    if(new_pos >= buf->size)
+        new_pos = relative_offset < 0 ? 0 : buf->size - 1;
     gap_set_gap(buf, new_pos);
 }
 
@@ -119,16 +128,33 @@ size_t gap_get_gap_pos(GapBuffer buf)
     return buf->gap_pos;
 }
 
-char* gap_get_data(GapBuffer buf)
+const char* gap_get_data_before_gap(GapBuffer buf)
 {
     GEM_ASSERT(buf != NULL);
     return buf->data;
 }
 
+const char* gap_get_data_after_gap(GapBuffer buf)
+{
+    GEM_ASSERT(buf != NULL);
+    return buf->data + buf->capacity - buf->size + buf->gap_pos;
+}
+
 char gap_char_at(GapBuffer buf, size_t pos)
 {
     GEM_ASSERT(buf != NULL);
-    return pos < buf->gap_pos ? buf->data[pos] : buf->data[buf->capacity - buf->size + pos];
+    GEM_ASSERT(pos < buf->size);
+    return buf->data[pos < buf->gap_pos ? pos : buf->capacity - buf->size + pos];
+}
+
+char gap_set_at(GapBuffer buf, size_t pos, char c)
+{
+    GEM_ASSERT(buf != NULL);
+    GEM_ASSERT(pos < buf->size);
+    char* p = buf->data + (pos < buf->gap_pos ? pos : buf->capacity - buf->size + pos);
+    char prev = *p;
+    *p = c;
+    return prev;
 }
 
 void gap_print_buffer(GapBuffer buf)

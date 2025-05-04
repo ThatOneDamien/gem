@@ -32,12 +32,16 @@ static GLuint s_Shader;
 static GemFont s_Font;
 static TextVertex* s_VertexData;
 static TextVertex* s_VertexInsert;
+static uint32_t s_QuadCnt; // Quad count of current batch
+static GemRenderStats s_Stats;
 
 static bool create_shader_program(const char* vert_path, const char* frag_path, GLuint* program_id);
+
+
 #ifdef GEM_DEBUG
 static APIENTRY void debugCallbackFunc(GLenum, GLenum, GLuint, GLenum, GLsizei, const GLchar*,
                                        const void*);
-#endif
+#endif // GEM_DEBUG
 
 void gem_renderer_init(void)
 {
@@ -49,6 +53,8 @@ void gem_renderer_init(void)
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+    glEnable(GL_FRAMEBUFFER_SRGB);
+
     glCreateVertexArrays(1, &s_VAO);
     glCreateBuffers(1, &s_VBO);
     glCreateBuffers(1, &s_IBO);
@@ -56,13 +62,6 @@ void gem_renderer_init(void)
     glBindVertexArray(s_VAO);
     glBindBuffer(GL_ARRAY_BUFFER, s_VBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(TextVertex) * MAX_VERTICES, NULL, GL_DYNAMIC_DRAW);
-    // TextVertex vertices[4] = {
-    //     {  { 300.0f, 100.0f }, { 0.0f, 1.0f } },
-    //     {  { 600.0f, 100.0f }, { 1.0f, 1.0f } },
-    //     {  { 600.0f, 400.0f }, { 1.0f, 0.0f } },
-    //     {  { 300.0f, 400.0f }, { 0.0f, 0.0f } }
-    // };
-    // glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_IBO);
 
@@ -114,6 +113,28 @@ void gem_renderer_cleanup(void)
     glDeleteVertexArrays(1, &s_VAO);
 }
 
+void gem_renderer_start_batch(void)
+{
+    s_VertexInsert = s_VertexData;
+    s_QuadCnt = 0;
+    s_Stats.draw_calls = 0;
+    s_Stats.quad_count = 0;
+}
+
+void gem_renderer_render_batch(void)
+{
+    if(s_QuadCnt == 0)
+        return;
+
+    glBufferSubData(GL_ARRAY_BUFFER, 0, (uintptr_t)s_VertexInsert - (uintptr_t)s_VertexData, s_VertexData);
+    glDrawElements(GL_TRIANGLES, s_QuadCnt * 6, GL_UNSIGNED_INT, NULL);
+
+    s_Stats.quad_count += s_QuadCnt; // Add quad count of current batch to the total
+    s_Stats.draw_calls++;
+    s_VertexInsert = s_VertexData;
+    s_QuadCnt = 0;
+}
+
 static const GemGlyphData* get_glyph_data_from_font(const GemFont* font, char c)
 {
     size_t index = c >= GEM_PRINTABLE_ASCII_START && c < GEM_PRINTABLE_ASCII_END
@@ -122,17 +143,25 @@ static const GemGlyphData* get_glyph_data_from_font(const GemFont* font, char c)
     return font->glyphs[index].width == 0 ? &font->glyphs[0] : &font->glyphs[index];
 }
 
-void gem_draw_str(const char* str, size_t count, const GemQuad* bounding_box)
+static void draw_str_at(const char* str, size_t count, const GemQuad* bounding_box, float* penX, float* penY)
 {
-    GEM_ASSERT(str != NULL);
+    float pen_X = *penX;
+    float pen_Y = *penY;
 
-    s_VertexInsert = s_VertexData;
-    float pen_X = bounding_box->bottom_left[0] + 10.0f;
-    float pen_Y = bounding_box->top_right[1] - (float)GEM_FONT_SIZE;
-    for(size_t i = 0; (count && i < count) || (!count && str[i]); ++i)
+    for(size_t i = 0; i < count; ++i)
     {
+        if(s_QuadCnt == MAX_QUADS)
+            gem_renderer_render_batch();
         char c = str[i];
-        if(c != ' ' && c != '\n')
+
+        if(c == '\n')
+        {
+            pen_X = bounding_box->bottom_left[0] + 10.0f;
+            pen_Y -= 20.0f;
+        }
+        else if(c == ' ')
+            pen_X += s_Font.advance;
+        else if(pen_X < bounding_box->top_right[0])
         {
             const GemGlyphData* data = get_glyph_data_from_font(&s_Font, c);
             s_VertexInsert[0].position[0] = pen_X + data->xoff;
@@ -156,61 +185,29 @@ void gem_draw_str(const char* str, size_t count, const GemQuad* bounding_box)
             s_VertexInsert[3].tex_coords[1] = data->tex_maxY;
 
             s_VertexInsert += 4;
+            s_QuadCnt++;
+            pen_X += s_Font.advance;
         }
-        pen_X += s_Font.advance;
     }
-    glBufferSubData(GL_ARRAY_BUFFER, 0, (uintptr_t)s_VertexInsert - (uintptr_t)s_VertexData,
-                    s_VertexData);
-    glDrawElements(GL_TRIANGLES,
-                   ((uintptr_t)s_VertexInsert - (uintptr_t)s_VertexData) / sizeof(TextVertex) / 4 *
-                       6,
-                   GL_UNSIGNED_INT, NULL);
+    *penX = pen_X;
+    *penY = pen_Y;
 }
-//
-// void gem_draw_buffer(GapBuffer buf, const GemQuad* bounding_box)
-// {
-//     GEM_ASSERT(buf != NULL);
-//
-//     s_VertexInsert = s_VertexData;
-//     float pen_X = bounding_box->bottom_left[0] + 10.0f;
-//     float pen_Y = bounding_box->top_right[1] - (float)GEM_FONT_SIZE;
-//     for(size_t i = 0; (count && i < count) || (!count && str[i]); ++i)
-//     {
-//         char c = str[i];
-//         if(c != ' ' && c != '\n')
-//         {
-//             const GemGlyphData* data = get_glyph_data_from_font(&s_Font, c);
-//             s_VertexInsert[0].position[0] = pen_X + data->xoff;
-//             s_VertexInsert[0].position[1] = pen_Y + data->yoff - data->height;
-//             s_VertexInsert[0].tex_coords[0] = data->tex_minX;
-//             s_VertexInsert[0].tex_coords[1] = data->tex_minY;
-//
-//             s_VertexInsert[1].position[0] = pen_X + data->xoff + data->width;
-//             s_VertexInsert[1].position[1] = pen_Y + data->yoff - data->height;
-//             s_VertexInsert[1].tex_coords[0] = data->tex_maxX;
-//             s_VertexInsert[1].tex_coords[1] = data->tex_minY;
-//
-//             s_VertexInsert[2].position[0] = pen_X + data->xoff + data->width;
-//             s_VertexInsert[2].position[1] = pen_Y + data->yoff;
-//             s_VertexInsert[2].tex_coords[0] = data->tex_maxX;
-//             s_VertexInsert[2].tex_coords[1] = data->tex_maxY;
-//
-//             s_VertexInsert[3].position[0] = pen_X + data->xoff;
-//             s_VertexInsert[3].position[1] = pen_Y + data->yoff;
-//             s_VertexInsert[3].tex_coords[0] = data->tex_minX;
-//             s_VertexInsert[3].tex_coords[1] = data->tex_maxY;
-//
-//             s_VertexInsert += 4;
-//         }
-//         pen_X += s_Font.advance;
-//     }
-//     glBufferSubData(GL_ARRAY_BUFFER, 0, (uintptr_t)s_VertexInsert - (uintptr_t)s_VertexData,
-//                     s_VertexData);
-//     glDrawElements(GL_TRIANGLES,
-//                    ((uintptr_t)s_VertexInsert - (uintptr_t)s_VertexData) / sizeof(TextVertex) / 4 *
-//                        6,
-//                    GL_UNSIGNED_INT, NULL);
-// }
+
+void gem_renderer_draw_buffer(GapBuffer buf, const GemQuad* bounding_box)
+{
+    GEM_ASSERT(buf != NULL);
+    GEM_ASSERT(bounding_box != NULL);
+
+    float pen_X = bounding_box->bottom_left[0] + 10.0f;
+    float pen_Y = bounding_box->top_right[1] - (float)GEM_FONT_SIZE;
+    size_t gap_pos = gap_get_gap_pos(buf);
+    size_t gap_size = gap_get_size(buf);
+
+    if(gap_pos != 0)
+        draw_str_at(gap_get_data_before_gap(buf), gap_pos, bounding_box, &pen_X, &pen_Y);
+    if(gap_size - gap_pos != 0)
+        draw_str_at(gap_get_data_after_gap(buf), gap_size - gap_pos, bounding_box, &pen_X, &pen_Y);
+}
 
 
 static bool create_shader_program(const char* vert_path, const char* frag_path, GLuint* program_id)
@@ -271,6 +268,11 @@ static bool create_shader_program(const char* vert_path, const char* frag_path, 
 
     *program_id = program;
     return true;
+}
+
+const GemRenderStats* gem_renderer_get_stats(void)
+{
+    return &s_Stats;
 }
 
 #ifdef GEM_DEBUG
