@@ -35,7 +35,8 @@ static TextVertex* s_VertexInsert;
 static uint32_t s_QuadCnt; // Quad count of current batch
 static GemRenderStats s_Stats;
 
-static bool create_shader_program(const char* vert_path, const char* frag_path, GLuint* program_id);
+static bool create_shader_program(const char*, const char*, GLuint*);
+static void draw_str_at(const char*, size_t, const GemQuad*, float*, float*);
 
 
 #ifdef GEM_DEBUG
@@ -135,6 +136,13 @@ void gem_renderer_render_batch(void)
     s_QuadCnt = 0;
 }
 
+void gem_renderer_draw_str(const char* str, const GemQuad* bounding_box)
+{
+    float penX = bounding_box->bottom_left[0];
+    float penY = bounding_box->top_right[1];
+    draw_str_at(str, strlen(str), bounding_box, &penX, &penY);
+}
+
 static const GemGlyphData* get_glyph_data_from_font(const GemFont* font, char c)
 {
     size_t index = c >= GEM_PRINTABLE_ASCII_START && c < GEM_PRINTABLE_ASCII_END
@@ -191,22 +199,6 @@ static void draw_str_at(const char* str, size_t count, const GemQuad* bounding_b
     }
     *penX = pen_X;
     *penY = pen_Y;
-}
-
-void gem_renderer_draw_buffer(GapBuffer buf, const GemQuad* bounding_box)
-{
-    GEM_ASSERT(buf != NULL);
-    GEM_ASSERT(bounding_box != NULL);
-
-    float pen_X = bounding_box->bottom_left[0] + 10.0f;
-    float pen_Y = bounding_box->top_right[1] - (float)GEM_FONT_SIZE;
-    size_t gap_pos = gap_get_gap_pos(buf);
-    size_t gap_size = gap_get_size(buf);
-
-    if(gap_pos != 0)
-        draw_str_at(gap_get_data_before_gap(buf), gap_pos, bounding_box, &pen_X, &pen_Y);
-    if(gap_size - gap_pos != 0)
-        draw_str_at(gap_get_data_after_gap(buf), gap_size - gap_pos, bounding_box, &pen_X, &pen_Y);
 }
 
 
