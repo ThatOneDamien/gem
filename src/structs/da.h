@@ -98,4 +98,4 @@ typedef struct
     char* data;
     size_t size;
     size_t capacity;
-} GemStringBuilder;
+} StringBuilder;

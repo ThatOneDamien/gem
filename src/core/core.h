@@ -69,3 +69,9 @@
             GEM_ERROR_ARGS(msg, __VA_ARGS__) exit(EXIT_FAILURE); \
         }                                                        \
     }
+
+#ifdef __GNUC__
+    #define alignas(alignment) __attribute__((packed,aligned(alignment)))
+#else
+    #define alignas(alignment) 
+#endif

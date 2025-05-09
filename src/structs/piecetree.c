@@ -4,91 +4,143 @@
 #include <limits.h>
 #include <string.h>
 
-// static void pt_node_at_offset(GemPieceTree*, size_t, NodeIdx*, size_t*);
-static size_t pt_alloc_node(GemPieceTree*);
-static void   pt_free_node(GemPieceTree*, size_t);
+struct alignas(1) PTNode
+{
+    size_t  start;
+    size_t  length;
+    size_t  newln_cnt;
+
+    size_t  left_sub_size;
+    size_t  left_newln_cnt;
+
+    PTNode* left;
+    PTNode* right;
+    PTNode* parent;
+
+    bool    is_original;
+    bool    is_black;
+};
+
+struct alignas(8) PTInternNode
+{
+    PTNode node;
+    bool   free;
+};
+
+
+static PTNode* node_at_offset(PieceTree*, size_t, size_t*);
+static PTNode* alloc_node(PieceTree*);
+static void    free_node(PieceTree*, PTNode*);
+static void    expand_node_storage(PieceTree*, size_t);
+static size_t  get_newln_count(const char*, size_t);
+static void    bubble_meta_changes(PieceTree*, PTNode*, int64_t, int64_t);
+
+static PTNode* left_test(PieceTree*, PTNode*);
+static PTNode* right_test(PieceTree*, PTNode*);
+static void    fix_insert(PieceTree*, PTNode*);
+static void    left_rotate(PieceTree*, PTNode*);
+static void    right_rotate(PieceTree*, PTNode*);
+
+static inline void mark_free(PieceTree*, size_t);
+static inline bool in_valid_range(PieceTree*, const PTNode*);
+
+static PTNode s_Sentinel = (PTNode){
+    .start          = 0,
+    .length         = 0, 
+    .newln_cnt      = 0,
+
+    .left_sub_size  = 0,
+    .left_newln_cnt = 0,
+
+    .left           = NULL,
+    .right          = NULL,
+    .parent         = NULL,
+
+    .is_original    = false,
+    .is_black       = true,
+};
+static PTNode* const SENTINEL = &s_Sentinel;
 
 // TODO: Change this to take ownership of the pointer so copying isnt necessary.
-void gem_piece_tree_init(GemPieceTree* pt, const char* original_src, bool copy)
+void piece_tree_init(PieceTree* pt, const char* original_src, bool copy)
 {
     GEM_ASSERT(pt != NULL);
-    GEM_ASSERT(original_src != NULL);
-    // Temporary
-    GEM_ASSERT(original_src[0] != '\0');
+    memset(pt, 0, sizeof(PieceTree));
 
-    pt->original_size = strlen(original_src);
-    pt->size = pt->original_size;
-    if(copy)
-    {
-        char* original = malloc(pt->size);
-        GEM_ENSURE(original != NULL);
-        memcpy(original, original_src, pt->size * sizeof(char));
-        pt->original = original;
-    }
-    else
-        pt->original = original_src;
-
-    pt->node_buffer.capacity = 10; 
-    pt->node_buffer.data = malloc(sizeof(GemPTNode) * pt->node_buffer.capacity);
+    pt->storage.capacity = 10; 
+    pt->storage.data = malloc(pt->storage.capacity * sizeof(PTInternNode));
 
     // TODO: Replace the 0 initial capacities with something more reasonable
     // to start with.
     da_init(&pt->added, 0);
-    da_init(&pt->free_list, pt->node_buffer.capacity);
+    da_init(&pt->added_newlines, 0);
+    da_init(&pt->free_list, pt->storage.capacity);
+    pt->size = original_src == NULL ? 0 : strlen(original_src);
+    pt->original.size = pt->size;
 
-    da_resize(&pt->free_list, pt->node_buffer.capacity);
-    for(size_t i = 0, j = 9; i < pt->free_list.size; ++i, --j)
+    if(pt->size == 0)
     {
-        pt->node_buffer.data[i].__free = true;
-        pt->free_list.data[i] = j;
+        mark_free(pt, 0);
+        return;
     }
 
-    size_t idx = pt_alloc_node(pt);
-    size_t idx2 = pt_alloc_node(pt);
-    pt_free_node(pt, idx);
-    pt_free_node(pt, idx2);
-    printf("Allocated node at %lu\n", idx);
+    if(copy)
+    {
+        pt->original.data = malloc(pt->size);
+        GEM_ENSURE(pt->original.data != NULL);
+        memcpy((void*)pt->original.data, original_src, pt->size * sizeof(char));
+    }
+    else
+        pt->original.data = original_src;
 
-    // da_resize(&pt->nodes, 1);
-    // pt->nodes.data[1] = (GemPTNode){
-    //     .start = 0,
-    //     .length = pt->original.size,
-    //     .newln_cnt = 0, // FIXME!!!!!!!!
-    //     
-    //     .left_sub_size = 0,
-    //     .left_newln_cnt = 0,
-    //
-    //     .is_original = true,
-    //     .is_black = true
-    // };
 
-    // pt->size += 4;
-    // da_append_arr(&pt->added, "Bruh", 4);
-    // pt->nodes.data[2] = PT_NULL_NODE();
-    // pt->nodes.data[0] = (GemPTNode){
-    //     .start = 0,
-    //     .length = 4,
-    //     .newln_cnt = 0,
-    //
-    //     .left_sub_size = pt->original.size,
-    //     .left_newln_cnt = 0,
-    //
-    //     .is_original = false,
-    //     .is_black = false
-    // }; // Temp for testing 
+    mark_free(pt, 1);
+    pt->original.newlines_size = get_newln_count(pt->original.data, pt->size);
+    pt->original.newlines = malloc(sizeof(size_t) * pt->original.newlines_size);
+    pt->newline_count = pt->original.newlines_size;
+    GEM_ENSURE(pt->original.newlines != NULL);
+    size_t* nls = (size_t*)pt->original.newlines;
+    for(size_t i = 0; i < pt->size; ++i)
+        if(pt->original.data[i] == '\n')
+        {
+            *nls = i;
+            nls++;
+        }
+
+    pt->root = &pt->storage.data[0].node;
+    pt->storage.data[0] = (PTInternNode){
+        .node = {
+            .start          = 0,
+            .length         = pt->size,
+            .newln_cnt      = pt->newline_count,
+
+            .left_sub_size  = 0,
+            .left_newln_cnt = 0,
+
+            .left           = SENTINEL,
+            .right          = SENTINEL,
+            .parent         = SENTINEL,
+
+            .is_original    = true,
+            .is_black       = true,
+        },
+        .free         = false
+    };
 }
 
-void gem_piece_tree_free(GemPieceTree* pt)
+void piece_tree_free(PieceTree* pt)
 {
-    free((void*)pt->original);
-    free(pt->node_buffer.data);
+    free(pt->storage.data);
+    free((void*)pt->original.data);
+    free((void*)pt->original.newlines);
 
     da_free_data(&pt->added);
+    da_free_data(&pt->added_newlines);
     da_free_data(&pt->free_list);
 }
 
 
-void gem_piece_tree_insert(GemPieceTree* pt, const char* str, size_t offset)
+void piece_tree_insert(PieceTree* pt, const char* str, size_t offset)
 {
     GEM_ASSERT(pt != NULL);
     GEM_ASSERT(str != NULL);
@@ -96,143 +148,450 @@ void gem_piece_tree_insert(GemPieceTree* pt, const char* str, size_t offset)
     if(str[0] == '\0')
         return;
 
-    // Original string was of size 0, so we need to add
-    // the root node.
-    // if(pt->nodes.size == 0) 
-    // {
-    // }
+    if(pt->free_list.size < 2)
+        expand_node_storage(pt, pt->storage.capacity + (pt->storage.capacity >> 1) + 2);
 
-    // NodeIdx node_idx;
-    // GemPTNode* node;
-    // size_t node_start_offset;
-    // size_t node_end;
-    // size_t len = strlen(str);
-    //
-    // pt_node_at_offset(pt, offset, &node_idx, &node_start_offset);
-    // node = pt_get_ref(pt, node_idx);
-    // node_end = node->start + node->length;
-    //
-    // printf("NodeIdx: %lu, start: %lu\n", node_idx, node_start_offset);
-    //
-    // if(!node->is_original && node_end == pt->added.size && node_start_offset + node->length == offset)
-    // {
-    //     printf("Appending\n");
-    //     node->length += len;
-    //     da_append_arr(&pt->added, str, len);
-    // }
-    // else if(node_start_offset == offset)
-    // {
-    //     printf("Adding to the left of a node\n");
-    //
-    // }
+    PTNode* node;
+    size_t node_start_offset;
+    size_t len = strlen(str);
+    size_t newline_count = 0;
+    for(size_t i = 0; i < len; ++i)
+        if(str[i] == '\n')
+        {
+            da_append(&pt->added_newlines, i);
+            newline_count++;
+        }
+
+    PTNode new_node = (PTNode){
+            .start          = pt->added.size,
+            .length         = len,
+            .newln_cnt      = newline_count,
+
+            .left_sub_size  = 0,
+            .left_newln_cnt = 0,
+
+            .left           = SENTINEL,
+            .right          = SENTINEL,
+            .parent         = SENTINEL,
+
+            .is_original    = false,
+            .is_black       = false
+    };
+
+    da_append_arr(&pt->added, str, len);
+    pt->size += len;
+    pt->newline_count += newline_count;
+
+    if(pt->root == NULL)
+    {
+        pt->root = alloc_node(pt);
+        new_node.is_black = true;
+        *pt->root = new_node;
+        return;
+    }
+
+    node = node_at_offset(pt, offset, &node_start_offset);
+
+    if(node_start_offset == offset) // Insert to the left of node
+    {
+        PTNode* new = alloc_node(pt);
+        *new = new_node;
+        if(node->left == SENTINEL)
+        {
+            new->parent = node;
+            node->left = new;
+        }
+        else
+        {
+            PTNode* rightmost = right_test(pt, node->left);
+            new->parent = rightmost;
+            rightmost->right = new;
+        }
+        bubble_meta_changes(pt, node->left, new->length, new->newln_cnt);
+        fix_insert(pt, new);
+        // TODO: Fix metadata
+    }
+    else if(node_start_offset + node->length > offset) // Split node
+    {
+        size_t node_new_len = offset - node_start_offset;
+        PTNode* new = alloc_node(pt);
+        PTNode* split = alloc_node(pt);
+        *new = new_node;
+        *split = (PTNode){
+            .start          = node->start + node_new_len,
+            .length         = node->length - node_new_len,
+
+            .left           = SENTINEL,
+            .right          = SENTINEL,
+            .parent         = SENTINEL,
+
+            .is_original    = node->is_original
+        };
+        split->newln_cnt = get_newln_count(pt->added.data + split->start, split->length);
+        node->length = node_new_len; 
+        node->newln_cnt -= split->newln_cnt;
+
+        if(node->right == SENTINEL) 
+        {
+            node->right = split;
+            split->parent = node;
+            bubble_meta_changes(pt, node, split->length, split->newln_cnt);
+        }
+        else
+        {
+            PTNode* leftmost = left_test(pt, node->right);
+            leftmost->left = split;
+            split->parent = leftmost;
+            bubble_meta_changes(pt, split, split->length, split->newln_cnt);
+        }
+        fix_insert(pt, split);
+
+        PTNode* leftmost = left_test(pt, node->right);
+        leftmost->left = new;
+        new->parent = leftmost;
+        bubble_meta_changes(pt, new, new->length, new->newln_cnt);
+
+        fix_insert(pt, new);
+    }
+    else if(!node->is_original && node->start + node->length == pt->added.size - len) // Append to node
+    {
+        node->length += len;
+        node->newln_cnt += new_node.newln_cnt;
+        bubble_meta_changes(pt, node, len, new_node.newln_cnt);
+    }
+    else // Insert to the right of node
+    {
+        PTNode* new = alloc_node(pt);
+        *new = new_node;
+        if(node->right == SENTINEL) 
+        {
+            node->right = new;
+            new->parent = node;
+            bubble_meta_changes(pt, node, new->length, new->newln_cnt);
+        }
+        else
+        {
+            PTNode* leftmost = left_test(pt, node->right);
+            leftmost->left = new;
+            new->parent = leftmost;
+            bubble_meta_changes(pt, new, new->length, new->newln_cnt);
+        }
+        fix_insert(pt, new);
+    }
+
 }
 
-// static void pt_print_node(GemPieceTree* pt, NodeIdx node_idx)
-// {
-//     GemPTNode* node = pt_get_ref(pt, node_idx);
-//     if(!node_valid(node))
-//         return;
-//
-//     pt_print_node(pt, ptn_left(pt, node_idx, NULL));
-//     size_t end = node->start + node->length;
-//     for(size_t j = node->start; j < end; ++j)
-//         putc(node->is_original ? pt->original.data[j] : pt->added.data[j], stdout);
-//     pt_print_node(pt, ptn_right(pt, node_idx, NULL));
-// }
-//
-// void gem_piece_tree_print(GemPieceTree* pt)
-// {
-//     GEM_ASSERT(pt != NULL);
-//     
-//     printf("Original Contents (size %lu):\n", pt->original.size);
-//     for(size_t i = 0; i < pt->original.size; ++i)
-//         putc(pt->original.data[i], stdout);
-//
-//     printf("\n\nAdded Contents (size %lu):\n", pt->added.size);
-//     for(size_t i = 0; i < pt->added.size; ++i)
-//         putc(pt->added.data[i], stdout);
-//
-//     printf("\n\nTrue Contents (size %lu):\n", pt->size);
-//     pt_print_node(pt, PT_ROOT_IDX);
-//     printf("\n");
-// }
+static void print_node_contents(PieceTree* pt, PTNode* node)
+{
+    if(!in_valid_range(pt, node) || ((PTInternNode*)node)->free)
+        return;
 
-void gem_piece_tree_freelist(GemPieceTree* pt)
+    print_node_contents(pt, node->left);
+    size_t end = node->start + node->length;
+    for(size_t j = node->start; j < end; ++j)
+        putc(node->is_original ? pt->original.data[j] : pt->added.data[j], stdout);
+    print_node_contents(pt, node->right);
+}
+
+void piece_tree_print_contents(PieceTree* pt)
 {
     GEM_ASSERT(pt != NULL);
-    printf("Free List Size: %lu\nFree List Contents:\n\t", pt->free_list.size);
-    for(size_t i = 0; i < pt->free_list.size; ++i)
-    {
-        printf("%lu ", pt->free_list.data[pt->free_list.size - i - 1]);
-        if(i % 8 == 7)
-            printf("\n\t");
-    }
+    
+    // printf("Original Contents (size %lu):\n", pt->original_size);
+    // for(size_t i = 0; i < pt->original_size; ++i)
+    //     putc(pt->original[i], stdout);
+    //
+    // printf("\n\nAdded Contents (size %lu):\n", pt->added.size);
+    // for(size_t i = 0; i < pt->added.size; ++i)
+    //     putc(pt->added.data[i], stdout);
+
+    // printf("\n\nTrue Contents (size %lu):\n", pt->size);
+    print_node_contents(pt, pt->root);
     printf("\n");
 }
 
-static size_t UNUSED pt_alloc_node(GemPieceTree* pt)
+static void print_node_metadata(PieceTree* pt, PTNode* node, size_t depth)
 {
-    size_t node_idx;
-    if(pt->free_list.size > 0)
+    if(!in_valid_range(pt, node) || ((PTInternNode*)node)->free)
+        return;
+
+    print_node_metadata(pt, node->right, depth + 1);
+    for(size_t i = 0; i < depth; ++i)
+        printf("  ");
+    printf("(%s %s Start:%lu Length:%lu NewLnCnt:%lu LeftSubSize:%lu LeftNewLn:%lu)\n", 
+           node->is_black ? "Black" : "Red",
+           node->is_original ? "Original" : "Added",
+           node->start,
+           node->length,
+           node->newln_cnt,
+           node->left_sub_size,
+           node->left_newln_cnt);
+    print_node_metadata(pt, node->left, depth + 1);
+}
+
+void piece_tree_print_tree(PieceTree* pt)
+{
+    GEM_ASSERT(pt != NULL);
+    print_node_metadata(pt, pt->root, 0);
+}
+
+// TODO: Change this when the 'text box' abstraction
+// is added so that the current pen location is stored.
+static float s_PenX, s_PenY;
+static PieceTree* s_Tree;
+static const GemQuad* s_Bounding;
+static void render_node(PTNode* node)
+{
+    if(node == SENTINEL)
+        return;
+
+    render_node(node->left);
+    gem_renderer_draw_str_at((node->is_original ? s_Tree->original.data : s_Tree->added.data) + node->start,
+                             node->length,
+                             s_Bounding, &s_PenX, &s_PenY);
+    render_node(node->right);
+}
+
+void piece_tree_render(PieceTree* pt, const GemQuad* bounding_box)
+{
+    GEM_ASSERT(pt != NULL);
+    if(pt->root == NULL)
+        return;
+    s_PenX = bounding_box->bottom_left[0];
+    s_PenY = bounding_box->top_right[1];
+    s_Tree = pt;
+    s_Bounding = bounding_box;
+    render_node(pt->root);
+}
+
+static PTNode* node_at_offset(PieceTree* pt, size_t offset, size_t* node_start_offset)
+{
+    GEM_ASSERT(offset <= pt->size);
+    PTNode* node = pt->root;
+    size_t startoff = 0;
+
+    while(node != SENTINEL)
     {
-        node_idx = pt->free_list.data[pt->free_list.size - 1];
-        GEM_ASSERT(pt->node_buffer.data[node_idx].__free);
-        pt->free_list.size--;
+        if(node->left_sub_size > offset) // Offset is in left subtree
+            node = node->left;
+        else if(node->left_sub_size + node->length >= offset) // Offset is inside this node
+        {
+            *node_start_offset = startoff + node->left_sub_size;
+            return node;
+        }
+        else // Offset is in right subtree
+        {
+            offset -= node->left_sub_size + node->length;
+            startoff += node->left_sub_size + node->length;
+            node = node->right;
+        }
     }
+
+    GEM_ERROR("This should not have been reached.");
+    return NULL;
+}
+
+static PTNode* alloc_node(PieceTree* pt)
+{
+    GEM_ASSERT(pt->free_list.size > 0);
+    size_t node_idx = pt->free_list.data[pt->free_list.size - 1];
+    GEM_ASSERT(pt->storage.data[node_idx].free);       
+    
+    pt->free_list.size--;
+    PTInternNode* node = pt->storage.data + node_idx;
+    node->free = false;
+    return &node->node;
+}
+
+static UNUSED void free_node(PieceTree* pt, PTNode* node)
+{
+    if(node == SENTINEL || node == NULL)
+        return;
+    GEM_ASSERT(in_valid_range(pt, node));
+
+    PTInternNode* internal = (PTInternNode*)node;
+    GEM_ASSERT(!internal->free);
+    size_t index = ((uintptr_t)internal - (uintptr_t)pt->storage.data) / sizeof(PTInternNode);
+
+    internal->free = true;
+    da_append(&pt->free_list, index);
+}
+
+static void fix_pointer(PTNode** invalid, uintptr_t delta)
+{
+    if(*invalid != SENTINEL)
+        *invalid = (PTNode*)((uintptr_t)(*invalid) + delta);
+}
+
+static void expand_node_storage(PieceTree* pt, size_t capacity)
+{
+    if(pt->storage.capacity >= capacity)
+        return;
+
+    size_t prev_cap = pt->storage.capacity;
+    PTInternNode* prev_pointer = pt->storage.data;
+    pt->storage.data = realloc(pt->storage.data, sizeof(PTInternNode) * capacity);
+    GEM_ENSURE(pt->storage.data != NULL);
+    if(prev_pointer != pt->storage.data)
+    {
+        uintptr_t delta = (uintptr_t)pt->storage.data - (uintptr_t)prev_pointer;
+        fix_pointer(&pt->root, delta);
+        for(size_t i = 0; i < prev_cap; ++i)
+        {
+            PTInternNode* intern = pt->storage.data + prev_cap;
+            if(!intern->free)
+            {
+                fix_pointer(&intern->node.left, delta);
+                fix_pointer(&intern->node.right, delta);
+                fix_pointer(&intern->node.parent, delta);
+            }
+        }
+    }
+    pt->storage.capacity = capacity;
+    mark_free(pt, prev_cap);
+}
+
+static UNUSED size_t get_newln_count(const char* text, size_t size)
+{
+    size_t cnt = 0;
+    for(size_t i = 0; i < size; ++i)
+        if(text[i] == '\n')
+            ++cnt;
+    return cnt;
+}
+
+static void bubble_meta_changes(PieceTree* pt, PTNode* node, int64_t size_delta, int64_t newln_delta)
+{
+    GEM_ASSERT(node != SENTINEL);
+    while(node != pt->root)
+    {
+        if(node == node->parent->left)
+        {
+            node->parent->left_sub_size += size_delta;
+            node->parent->left_newln_cnt += newln_delta;
+        }
+        node = node->parent;
+    }
+}
+
+static PTNode* left_test(PieceTree* pt, PTNode* node)
+{
+    GEM_ASSERT(in_valid_range(pt, node));
+    while(node->left != SENTINEL)
+        node = node->left;
+    return node;
+}
+
+static PTNode* right_test(PieceTree* pt, PTNode* node)
+{
+    GEM_ASSERT(in_valid_range(pt, node));
+    while(node->right != SENTINEL)
+        node = node->right;
+    return node;
+}
+
+static void fix_insert(PieceTree* pt, PTNode* node)
+{
+    GEM_ASSERT(in_valid_range(pt, node));
+    while(node->parent != SENTINEL && !node->parent->is_black)
+    {
+        PTNode* aunt;
+        PTNode* zigzag_check;
+        void (*first_func)(PieceTree*, PTNode*);
+        void (*second_func)(PieceTree*, PTNode*);
+        if(node->parent == node->parent->parent->left)
+        {
+            aunt = node->parent->parent->right;
+            zigzag_check = node->parent->right;
+            first_func = left_rotate;
+            second_func = right_rotate;
+        }
+        else
+        {
+            aunt = node->parent->parent->left;
+            zigzag_check = node->parent->left;
+            first_func = right_rotate;
+            second_func = left_rotate;
+        }
+
+        if(aunt->is_black)
+        {
+            if(node == zigzag_check)
+            {
+                node = node->parent;
+                first_func(pt, node);
+            }
+            node->parent->is_black = true;
+            node->parent->parent->is_black = false;
+            second_func(pt, node->parent->parent);
+        }
+        else
+        {
+            node->parent->is_black = true;
+            aunt->is_black = true;
+            node->parent->parent->is_black = false;
+            node = node->parent->parent;
+        }
+    }
+    pt->root->is_black = true;
+}
+
+static void left_rotate(PieceTree* pt, PTNode* node)
+{
+    PTNode* right = node->right;
+    right->left_sub_size += node->left_sub_size + node->length;
+    right->left_newln_cnt += node->left_newln_cnt + node->newln_cnt;
+    node->right = right->left;
+
+    if(node->right != SENTINEL)
+        node->right->parent = node;
+    right->parent = node->parent;
+    if(pt->root == node)
+        pt->root = right;
+    else if(node->parent->left == node)
+        node->parent->left = right;
     else
-    {
-        node_idx = pt->node_buffer.capacity;
-        size_t new_cap = pt->node_buffer.capacity;
-        new_cap += new_cap >> 1;
-        pt->node_buffer.data = realloc(pt->node_buffer.data, sizeof(GemPTNode) * new_cap);
-        GEM_ENSURE(pt->node_buffer.data != NULL);
-        pt->node_buffer.capacity = new_cap;
+        node->parent->right = right;
 
-        da_resize(&pt->free_list, new_cap - node_idx - 1);
-        for(size_t i = 0, j = new_cap - 1; i < pt->free_list.size; ++i, --j)
-            pt->free_list.data[i] = j;
-    }
-
-    GemPTNode* node = pt->node_buffer.data + node_idx;
-    node->__free = false;
-    return node_idx;
+    right->left = node;
+    node->parent = right;
 }
 
-static void UNUSED pt_free_node(GemPieceTree* pt, size_t node_idx)
+static void right_rotate(PieceTree* pt, PTNode* node)
 {
-    GEM_ASSERT(node_idx < pt->node_buffer.capacity);
+    PTNode* left = node->left;
+    node->left = left->right;
+    if(left->right != SENTINEL)
+        left->right->parent = node;
+    left->parent = node->parent;
 
-    GemPTNode* node = pt->node_buffer.data + node_idx;
-    GEM_ASSERT(!node->__free);
+    node->left_sub_size -= left->left_sub_size + left->length;
+    node->left_newln_cnt -= left->left_newln_cnt + left->newln_cnt;
 
-    node->__free = true;
-    da_append(&pt->free_list, node_idx);
+    if(pt->root == node)
+        pt->root = left;
+    else if(node->parent->right == node)
+        node->parent->right = left;
+    else
+        node->parent->left = left;
+
+    left->right = node;
+    node->parent = left;
 }
 
-// static void pt_node_at_offset(GemPieceTree* pt, size_t offset, NodeIdx* node_idx, size_t* node_start_offset)
-// {
-//     GEM_ASSERT(offset <= pt->size);
-//     NodeIdx idx = PT_ROOT_IDX;
-//     GemPTNode* node = pt_root(pt);
-//     size_t startoff = 0;
-//
-//     while(node_valid(node))
-//     {
-//         if(node->left_sub_size > offset) // Offset is in left subtree
-//             idx = ptn_left(pt, idx, &node);
-//         else if(node->left_sub_size + node->length >= offset) // Offset is inside this node
-//         {
-//             *node_idx = idx;
-//             *node_start_offset = startoff + node->left_sub_size;
-//             return;
-//         }
-//         else
-//         {
-//             offset -= node->left_sub_size + node->length;
-//             startoff += node->left_sub_size + node->length;
-//             idx = ptn_right(pt, idx, &node);
-//         }
-//     }
-//
-//     GEM_ERROR("This should not have been reached.");
-// }
+static inline void mark_free(PieceTree* pt, size_t start)
+{
+    size_t prev_size = pt->free_list.size;
+    da_resize(&pt->free_list, prev_size + pt->storage.capacity - start);
+    for(size_t i = prev_size, j = start; i < pt->free_list.size; ++i, ++j)
+    {
+        pt->free_list.data[i] = pt->storage.capacity - j;
+        pt->storage.data[j].free = true;
+    }
+}
+
+static inline bool in_valid_range(PieceTree* pt, const PTNode* node)
+{
+    const PTInternNode* n = (const PTInternNode*)node;
+    return n >= pt->storage.data && n < (pt->storage.data + pt->storage.capacity);
+}

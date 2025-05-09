@@ -36,8 +36,6 @@ static uint32_t s_QuadCnt; // Quad count of current batch
 static GemRenderStats s_Stats;
 
 static bool create_shader_program(const char*, const char*, GLuint*);
-static void draw_str_at(const char*, size_t, const GemQuad*, float*, float*);
-
 
 #ifdef GEM_DEBUG
 static APIENTRY void debugCallbackFunc(GLenum, GLenum, GLuint, GLenum, GLsizei, const GLchar*,
@@ -140,7 +138,7 @@ void gem_renderer_draw_str(const char* str, const GemQuad* bounding_box)
 {
     float penX = bounding_box->bottom_left[0];
     float penY = bounding_box->top_right[1];
-    draw_str_at(str, strlen(str), bounding_box, &penX, &penY);
+    gem_renderer_draw_str_at(str, strlen(str), bounding_box, &penX, &penY);
 }
 
 static const GemGlyphData* get_glyph_data_from_font(const GemFont* font, char c)
@@ -151,7 +149,7 @@ static const GemGlyphData* get_glyph_data_from_font(const GemFont* font, char c)
     return font->glyphs[index].width == 0 ? &font->glyphs[0] : &font->glyphs[index];
 }
 
-static void draw_str_at(const char* str, size_t count, const GemQuad* bounding_box, float* penX, float* penY)
+void gem_renderer_draw_str_at(const char* str, size_t count, const GemQuad* bounding_box, float* penX, float* penY)
 {
     float pen_X = *penX;
     float pen_Y = *penY;
@@ -164,31 +162,35 @@ static void draw_str_at(const char* str, size_t count, const GemQuad* bounding_b
 
         if(c == '\n')
         {
-            pen_X = bounding_box->bottom_left[0] + 10.0f;
-            pen_Y -= 20.0f;
+            pen_X = bounding_box->bottom_left[0];
+            pen_Y -= (float)GEM_FONT_SIZE * 1.2f;
         }
         else if(c == ' ')
             pen_X += s_Font.advance;
+        else if(c == '\t')
+            pen_X += s_Font.advance * 4; // TODO: Change this to actually be correct lmao.
         else if(pen_X < bounding_box->top_right[0])
         {
             const GemGlyphData* data = get_glyph_data_from_font(&s_Font, c);
-            s_VertexInsert[0].position[0] = pen_X + data->xoff;
-            s_VertexInsert[0].position[1] = pen_Y + data->yoff - data->height;
+            float x = pen_X + data->xoff;
+            float y = pen_Y - GEM_FONT_SIZE + data->yoff;
+            s_VertexInsert[0].position[0] = x;
+            s_VertexInsert[0].position[1] = y - data->height;
             s_VertexInsert[0].tex_coords[0] = data->tex_minX;
             s_VertexInsert[0].tex_coords[1] = data->tex_minY;
 
-            s_VertexInsert[1].position[0] = pen_X + data->xoff + data->width;
-            s_VertexInsert[1].position[1] = pen_Y + data->yoff - data->height;
+            s_VertexInsert[1].position[0] = x + data->width;
+            s_VertexInsert[1].position[1] = y - data->height;
             s_VertexInsert[1].tex_coords[0] = data->tex_maxX;
             s_VertexInsert[1].tex_coords[1] = data->tex_minY;
 
-            s_VertexInsert[2].position[0] = pen_X + data->xoff + data->width;
-            s_VertexInsert[2].position[1] = pen_Y + data->yoff;
+            s_VertexInsert[2].position[0] = x + data->width;
+            s_VertexInsert[2].position[1] = y;
             s_VertexInsert[2].tex_coords[0] = data->tex_maxX;
             s_VertexInsert[2].tex_coords[1] = data->tex_maxY;
 
-            s_VertexInsert[3].position[0] = pen_X + data->xoff;
-            s_VertexInsert[3].position[1] = pen_Y + data->yoff;
+            s_VertexInsert[3].position[0] = x;
+            s_VertexInsert[3].position[1] = y;
             s_VertexInsert[3].tex_coords[0] = data->tex_minX;
             s_VertexInsert[3].tex_coords[1] = data->tex_maxY;
 
