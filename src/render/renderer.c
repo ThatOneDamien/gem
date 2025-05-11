@@ -21,21 +21,24 @@
 
 typedef struct
 {
-    vec2 position;
-    vec2 tex_coords;
-} TextVertex;
+    vec2  position;
+    vec2  tex_coords;
+    vec4  color;
+    float solid;
+} QuadVertex;
 
 static GLuint s_VAO;
 static GLuint s_VBO;
 static GLuint s_IBO;
 static GLuint s_Shader;
 static GemFont s_Font;
-static TextVertex* s_VertexData;
-static TextVertex* s_VertexInsert;
+static QuadVertex* s_VertexData;
+static QuadVertex* s_VertexInsert;
 static uint32_t s_QuadCnt; // Quad count of current batch
 static GemRenderStats s_Stats;
 
-static bool create_shader_program(const char*, const char*, GLuint*);
+static bool create_shader_program(const char* vert_path, const char* frag_path, GLuint* program_id);
+static void draw_quad(const GemQuad* quad, const GemQuad* tex, const vec4 color, bool is_solid);
 
 #ifdef GEM_DEBUG
 static APIENTRY void debugCallbackFunc(GLenum, GLenum, GLuint, GLenum, GLsizei, const GLchar*,
@@ -60,21 +63,31 @@ void gem_renderer_init(void)
 
     glBindVertexArray(s_VAO);
     glBindBuffer(GL_ARRAY_BUFFER, s_VBO);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(TextVertex) * MAX_VERTICES, NULL, GL_DYNAMIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(QuadVertex) * MAX_VERTICES, NULL, GL_DYNAMIC_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_IBO);
 
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(TextVertex), (const void*)0);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(TextVertex),
-                          (const void*)(sizeof(float) * 2));
+    // Position
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(QuadVertex), (const void*)0);
     glEnableVertexAttribArray(0);
+
+    // Tex Coords
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(QuadVertex), (const void*)(sizeof(float) * 2));
     glEnableVertexAttribArray(1);
+
+    // Color
+    glVertexAttribPointer(2, 4, GL_FLOAT, GL_FALSE, sizeof(QuadVertex), (const void*)(sizeof(float) * 4));
+    glEnableVertexAttribArray(2);
+
+    // Solid
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(QuadVertex), (const void*)(sizeof(float) * 8));
+    glEnableVertexAttribArray(3);
 
     bool result = create_shader_program(TEXT_VERT_SHADER, TEXT_FRAG_SHADER, &s_Shader);
     GEM_ENSURE_MSG(result, "Failed to create text shader, exiting.");
     glUseProgram(s_Shader);
 
-    s_VertexData = malloc(sizeof(TextVertex) * MAX_VERTICES);
+    s_VertexData = calloc(MAX_VERTICES, sizeof(QuadVertex));
     s_VertexInsert = s_VertexData;
 
     {
@@ -149,60 +162,118 @@ static const GemGlyphData* get_glyph_data_from_font(const GemFont* font, char c)
     return font->glyphs[index].width == 0 ? &font->glyphs[0] : &font->glyphs[index];
 }
 
-void gem_renderer_draw_str_at(const char* str, size_t count, const GemQuad* bounding_box, float* penX, float* penY)
+static void draw_char(char c, float x, float y)
 {
-    float pen_X = *penX;
-    float pen_Y = *penY;
-
-    for(size_t i = 0; i < count; ++i)
-    {
-        if(s_QuadCnt == MAX_QUADS)
-            gem_renderer_render_batch();
-        char c = str[i];
-
-        if(c == '\n')
-        {
-            pen_X = bounding_box->bottom_left[0];
-            pen_Y -= (float)GEM_FONT_SIZE * 1.2f;
-        }
-        else if(c == ' ')
-            pen_X += s_Font.advance;
-        else if(c == '\t')
-            pen_X += s_Font.advance * 4; // TODO: Change this to actually be correct lmao.
-        else if(pen_X < bounding_box->top_right[0])
-        {
-            const GemGlyphData* data = get_glyph_data_from_font(&s_Font, c);
-            float x = pen_X + data->xoff;
-            float y = pen_Y - GEM_FONT_SIZE + data->yoff;
-            s_VertexInsert[0].position[0] = x;
-            s_VertexInsert[0].position[1] = y - data->height;
-            s_VertexInsert[0].tex_coords[0] = data->tex_minX;
-            s_VertexInsert[0].tex_coords[1] = data->tex_minY;
-
-            s_VertexInsert[1].position[0] = x + data->width;
-            s_VertexInsert[1].position[1] = y - data->height;
-            s_VertexInsert[1].tex_coords[0] = data->tex_maxX;
-            s_VertexInsert[1].tex_coords[1] = data->tex_minY;
-
-            s_VertexInsert[2].position[0] = x + data->width;
-            s_VertexInsert[2].position[1] = y;
-            s_VertexInsert[2].tex_coords[0] = data->tex_maxX;
-            s_VertexInsert[2].tex_coords[1] = data->tex_maxY;
-
-            s_VertexInsert[3].position[0] = x;
-            s_VertexInsert[3].position[1] = y;
-            s_VertexInsert[3].tex_coords[0] = data->tex_minX;
-            s_VertexInsert[3].tex_coords[1] = data->tex_maxY;
-
-            s_VertexInsert += 4;
-            s_QuadCnt++;
-            pen_X += s_Font.advance;
-        }
-    }
-    *penX = pen_X;
-    *penY = pen_Y;
+    const GemGlyphData* data = get_glyph_data_from_font(&s_Font, c);
+    x += data->xoff;
+    y += data->yoff;
+    GemQuad quad = {
+        .bottom_left = { x, y - data->height },
+        .top_right = { x + data->width, y }
+    };
+    vec4 color = { 0.7f, 0.4f, 0.9f, 1.0f };
+    draw_quad(&quad, &data->tex_coords, color, false);
 }
 
+static void handle_char(char c, const GemQuad* bounding_box, float* penX, float* penY)
+{
+    if(c == '\n')
+    {
+        *penX = bounding_box->bottom_left[0];
+        *penY -= (float)GEM_FONT_SIZE * 1.2f;
+    }
+    else if(c == ' ')
+        *penX += s_Font.advance;
+    else if(c == '\t')
+        *penX += s_Font.advance * 4; // TODO: Change this to actually be correct lmao.
+    else if(*penX < bounding_box->top_right[0])
+    {
+        draw_char(c, *penX, *penY);
+        *penX += s_Font.advance;
+    }
+}
+
+void gem_renderer_draw_str_at(const char* str, size_t count, const GemQuad* bounding_box, float* penX, float* penY)
+{
+    *penY -= GEM_FONT_SIZE;
+
+    for(size_t i = 0; i < count && *penY > bounding_box->bottom_left[1]; ++i)
+        handle_char(str[i], bounding_box, penX, penY);
+
+    *penY += GEM_FONT_SIZE;
+}
+
+void gem_renderer_draw_buffer(const TextBuffer* buffer)
+{
+    GEM_ASSERT(buffer != NULL);
+
+    GemQuad line_sidebar = {
+        .bottom_left = { 
+            buffer->bounding_box.bottom_left[0], 
+            buffer->bounding_box.bottom_left[1] 
+        },
+        .top_right = { 
+            buffer->bounding_box.bottom_left[0] + s_Font.advance * 5 + 4.0f, 
+            buffer->bounding_box.top_right[1] 
+        }
+    };
+
+    GemQuad text_bb = {
+        .bottom_left = {
+            line_sidebar.top_right[0] + 10.0f,
+            line_sidebar.bottom_left[1]
+        },
+        .top_right = {
+            buffer->bounding_box.top_right[0],
+            line_sidebar.top_right[1]
+        }
+    };
+    
+    // Draw sidebar with line numbers
+    float penX;
+    float penY = line_sidebar.top_right[1] - GEM_FONT_SIZE;
+
+    draw_quad(&line_sidebar, NULL, (vec4){0.1f, 0.1f, 0.1f, 1.0f}, true);
+    for(size_t line = buffer->camera_start_line; penY > line_sidebar.bottom_left[1]; ++line)
+    {
+        penX = line_sidebar.top_right[0] - s_Font.advance - 2.0f;
+        if(line > buffer->contents.newline_count)
+            draw_char('~', penX, penY);
+        else
+        {
+            size_t cpy = line + 1;
+            while(cpy > 0)
+            {
+                draw_char('0' + cpy % 10, penX, penY);
+                penX -= s_Font.advance;
+                cpy /= 10;
+            }
+        }
+        penY -= (float)GEM_FONT_SIZE * 1.2f; // TODO: Make this a variable somewhere called 'line_height' or something
+    }
+
+    // Draw actual text in buffer.
+    penX = text_bb.bottom_left[0];
+    penY = text_bb.top_right[1];
+    const PieceTree* pt = &buffer->contents;
+
+    size_t node_offset;
+    const PTNode* node = piece_tree_node_at_line(pt, buffer->camera_start_line, &node_offset);
+    if(node == NULL)
+        return;
+
+    const char* buf = piece_tree_get_node_start(pt, node);
+    gem_renderer_draw_str_at(buf + node_offset, node->length - node_offset, &text_bb, &penX, &penY);
+
+    node = piece_tree_next_inorder(pt, node);
+    while(node != NULL)
+    {
+        buf = piece_tree_get_node_start(pt, node);
+        gem_renderer_draw_str_at(buf, node->length, &text_bb, &penX, &penY);
+        node = piece_tree_next_inorder(pt, node);
+    }
+
+}
 
 static bool create_shader_program(const char* vert_path, const char* frag_path, GLuint* program_id)
 {
@@ -262,6 +333,69 @@ static bool create_shader_program(const char* vert_path, const char* frag_path, 
 
     *program_id = program;
     return true;
+}
+
+static void draw_quad(const GemQuad* quad, const GemQuad* tex, const vec4 color, bool is_solid)
+{
+    GEM_ASSERT(is_solid || tex != NULL);
+    if(s_QuadCnt == MAX_QUADS)
+        gem_renderer_render_batch();
+
+    s_VertexInsert[0].position[0] = quad->bottom_left[0];
+    s_VertexInsert[0].position[1] = quad->bottom_left[1];
+    if(!is_solid)
+    {
+        s_VertexInsert[0].tex_coords[0] = tex->bottom_left[0];
+        s_VertexInsert[0].tex_coords[1] = tex->bottom_left[1];
+    }
+    s_VertexInsert[0].color[0] = color[0];
+    s_VertexInsert[0].color[1] = color[1];
+    s_VertexInsert[0].color[2] = color[2];
+    s_VertexInsert[0].color[3] = color[3];
+    s_VertexInsert[0].solid = (float)is_solid;
+
+    s_VertexInsert[1].position[0] = quad->top_right[0];
+    s_VertexInsert[1].position[1] = quad->bottom_left[1];
+    if(!is_solid)
+    {
+        s_VertexInsert[1].tex_coords[0] = tex->top_right[0];
+        s_VertexInsert[1].tex_coords[1] = tex->bottom_left[1];
+    }
+    s_VertexInsert[1].color[0] = color[0];
+    s_VertexInsert[1].color[1] = color[1];
+    s_VertexInsert[1].color[2] = color[2];
+    s_VertexInsert[1].color[3] = color[3];
+    s_VertexInsert[1].solid = (float)is_solid;
+
+    s_VertexInsert[2].position[0] = quad->top_right[0];
+    s_VertexInsert[2].position[1] = quad->top_right[1];
+    if(!is_solid)
+    {
+        s_VertexInsert[2].tex_coords[0] = tex->top_right[0];
+        s_VertexInsert[2].tex_coords[1] = tex->top_right[1];
+    }
+    s_VertexInsert[2].color[0] = color[0];
+    s_VertexInsert[2].color[1] = color[1];
+    s_VertexInsert[2].color[2] = color[2];
+    s_VertexInsert[2].color[3] = color[3];
+    s_VertexInsert[2].solid = (float)is_solid;
+
+    s_VertexInsert[3].position[0] = quad->bottom_left[0];
+    s_VertexInsert[3].position[1] = quad->top_right[1];
+    if(!is_solid)
+    {
+        s_VertexInsert[3].tex_coords[0] = tex->bottom_left[0];
+        s_VertexInsert[3].tex_coords[1] = tex->top_right[1];
+    }
+    s_VertexInsert[3].color[0] = color[0];
+    s_VertexInsert[3].color[1] = color[1];
+    s_VertexInsert[3].color[2] = color[2];
+    s_VertexInsert[3].color[3] = color[3];
+    s_VertexInsert[3].solid = (float)is_solid;
+
+    s_VertexInsert += 4;
+    s_QuadCnt++;
+
 }
 
 const GemRenderStats* gem_renderer_get_stats(void)

@@ -1,4 +1,5 @@
 #pragma once
+#include <structs/quad.h>
 
 #include <glad/glad.h>
 
@@ -11,8 +12,7 @@
 
 typedef struct
 {
-    float tex_minX, tex_minY;
-    float tex_maxX, tex_maxY;
+    GemQuad  tex_coords;
     uint32_t width, height;
     uint32_t xoff, yoff;
 } GemGlyphData;

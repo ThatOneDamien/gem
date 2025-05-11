@@ -84,15 +84,22 @@ bool gem_gen_font_atlas(const char* font_path, GemFont* font)
     memset(font, 0, sizeof(GemFont));
 
     FT_Bitmap* bmp = &face->glyph->bitmap;
-    font->glyphs[0] =
-        (GemGlyphData) { .tex_minX = (float)ATLAS_OFFSET / (float)tex_width,
-                         .tex_minY = (float)(ATLAS_OFFSET + bmp->rows) / (float)tex_height,
-                         .tex_maxX = (float)(ATLAS_OFFSET + bmp->width) / (float)tex_width,
-                         .tex_maxY = (float)ATLAS_OFFSET / (float)tex_height,
-                         .width = bmp->width,
-                         .height = bmp->rows,
-                         .xoff = face->glyph->bitmap_left,
-                         .yoff = face->glyph->bitmap_top };
+    font->glyphs[0] = (GemGlyphData) { 
+        .tex_coords = {
+            .bottom_left = { 
+                (float)ATLAS_OFFSET / (float)tex_width, 
+                (float)(ATLAS_OFFSET + bmp->rows) / (float)tex_height
+            },
+            .top_right = { 
+                (float)(ATLAS_OFFSET + bmp->width) / (float)tex_width,
+                (float)ATLAS_OFFSET / (float)tex_height 
+            }
+        },
+        .width = bmp->width,
+        .height = bmp->rows,
+        .xoff = face->glyph->bitmap_left,
+        .yoff = face->glyph->bitmap_top 
+    };
     font->advance = face->glyph->advance.x >> 6;
 
     for(uint32_t row = 0; row < bmp->rows; ++row)
@@ -108,15 +115,22 @@ bool gem_gen_font_atlas(const char* font_path, GemFont* font)
         size_t xloc = (i % ATLAS_COLUMNS) * cell_width + ATLAS_OFFSET;
         size_t yloc = (i / ATLAS_COLUMNS) * cell_height + ATLAS_OFFSET;
 
-        font->glyphs[i] =
-            (GemGlyphData) { .tex_minX = (float)xloc / (float)tex_width,
-                             .tex_minY = (float)(yloc + bmp->rows) / (float)tex_height,
-                             .tex_maxX = (float)(xloc + bmp->width) / (float)tex_width,
-                             .tex_maxY = (float)yloc / (float)tex_height,
-                             .width = bmp->width,
-                             .height = bmp->rows,
-                             .xoff = face->glyph->bitmap_left,
-                             .yoff = face->glyph->bitmap_top };
+        font->glyphs[i] = (GemGlyphData) { 
+            .tex_coords = {
+                .bottom_left = { 
+                    (float)xloc / (float)tex_width, 
+                    (float)(yloc + bmp->rows) / (float)tex_height
+                },
+                .top_right = { 
+                    (float)(xloc + bmp->width) / (float)tex_width,
+                    (float)yloc / (float)tex_height 
+                }
+            },
+            .width = bmp->width,
+            .height = bmp->rows,
+            .xoff = face->glyph->bitmap_left,
+            .yoff = face->glyph->bitmap_top 
+        };
 
         for(uint32_t row = 0; row < bmp->rows; ++row)
             memcpy(pixels + ((yloc + row) * tex_width + xloc), bmp->buffer + (row * bmp->pitch),

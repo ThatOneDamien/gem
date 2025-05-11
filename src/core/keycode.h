@@ -1,7 +1,9 @@
 #pragma once
 
+// Key macros
 #define GEM_KEY_NONE               0
 
+// Printable characters
 #define GEM_KEY_SPACE              32
 #define GEM_KEY_APOSTROPHE         39  /* ' */
 #define GEM_KEY_COMMA              44  /* , */
@@ -128,6 +130,12 @@
 
 #define GEM_KEY_LAST               GEM_KEY_MENU 
 
+// Key mod macros
+#define GEM_MOD_SHIFT              (1 << 0)
+#define GEM_MOD_CAPS               (1 << 1)
+#define GEM_MOD_CONTROL            (1 << 2)
+
+// Mouse button macros
 #define GEM_MOUSE_BUTTON_NONE      0
 #define GEM_MOUSE_BUTTON_1         1
 #define GEM_MOUSE_BUTTON_2         2

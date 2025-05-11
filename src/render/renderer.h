@@ -1,12 +1,6 @@
 #pragma once
-
-#include <cglm/cglm.h>
-
-typedef struct
-{
-    vec2 bottom_left;
-    vec2 top_right;
-} GemQuad;
+#include "structs/quad.h"
+#include "structs/textbuffer.h"
 
 typedef struct
 {
@@ -18,7 +12,7 @@ void gem_renderer_init(void);
 void gem_renderer_cleanup(void);
 void gem_renderer_start_batch(void);
 void gem_renderer_render_batch(void);
-void gem_renderer_draw_str(const char* str, const GemQuad* bounding_box);
 void gem_renderer_draw_str_at(const char* str, size_t count, const GemQuad* bounding_box, float* penX, float* penY);
+void gem_renderer_draw_buffer(const TextBuffer* buffer);
 const GemRenderStats* gem_renderer_get_stats(void);
 

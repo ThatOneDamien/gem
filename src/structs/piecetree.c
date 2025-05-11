@@ -4,22 +4,6 @@
 #include <limits.h>
 #include <string.h>
 
-struct alignas(1) PTNode
-{
-    size_t  start;
-    size_t  length;
-    size_t  newln_cnt;
-
-    size_t  left_sub_size;
-    size_t  left_newln_cnt;
-
-    PTNode* left;
-    PTNode* right;
-    PTNode* parent;
-
-    bool    is_original;
-    bool    is_black;
-};
 
 struct alignas(8) PTInternNode
 {
@@ -35,14 +19,14 @@ static void    expand_node_storage(PieceTree*, size_t);
 static size_t  get_newln_count(const char*, size_t);
 static void    bubble_meta_changes(PieceTree*, PTNode*, int64_t, int64_t);
 
-static PTNode* left_test(PieceTree*, PTNode*);
-static PTNode* right_test(PieceTree*, PTNode*);
+static PTNode* left_test(const PieceTree*, const PTNode*);
+static PTNode* right_test(const PieceTree*, const PTNode*);
 static void    fix_insert(PieceTree*, PTNode*);
 static void    left_rotate(PieceTree*, PTNode*);
 static void    right_rotate(PieceTree*, PTNode*);
 
 static inline void mark_free(PieceTree*, size_t);
-static inline bool in_valid_range(PieceTree*, const PTNode*);
+static inline bool in_valid_range(const PieceTree*, const PTNode*);
 
 static PTNode s_Sentinel = (PTNode){
     .start          = 0,
@@ -281,15 +265,86 @@ void piece_tree_insert(PieceTree* pt, const char* str, size_t offset)
 
 }
 
+const PTNode* piece_tree_node_at_line(const PieceTree* pt, size_t line, size_t* node_offset)
+{
+    GEM_ASSERT(pt != NULL);
+    GEM_ASSERT(node_offset != NULL);
+    GEM_ASSERT(line <= pt->newline_count);
+    if(line == 0)
+    {
+        *node_offset = 0;
+        return left_test(pt, pt->root);
+    }
+
+    PTNode* node = pt->root;
+    while(node != SENTINEL)
+    {
+        if(line < node->left_newln_cnt)
+            node = node->left;
+        else if(line <= node->left_newln_cnt + node->newln_cnt)
+        {
+            const char* buf = piece_tree_get_node_start(pt, node);
+            if(line == node->left_newln_cnt + node->newln_cnt &&
+               buf[node->length - 1] == '\n')
+            {
+                *node_offset = 0;
+                return piece_tree_next_inorder(pt, node);
+            }
+            line -= node->left_newln_cnt;
+            size_t offset;
+            for(offset = 0; line > 0 && offset < node->length; ++offset)
+                if(buf[offset] == '\n')
+                    --line;
+            *node_offset = offset;
+            return node;
+        }
+        else
+        {
+            line -= node->left_newln_cnt + node->newln_cnt;
+            node = node->right;
+        }
+    }
+
+    GEM_ERROR("Shouldn't be here.");
+    return NULL;
+}
+
+const PTNode* piece_tree_next_inorder(const PieceTree* pt, const PTNode* node)
+{
+    GEM_ASSERT(pt != NULL);
+    GEM_ASSERT(node != SENTINEL);
+    GEM_ASSERT(in_valid_range(pt, node));
+
+    if(node->right != SENTINEL)
+        return left_test(pt, node->right);
+    
+    while(node != pt->root)
+    {
+        if(node == node->parent->left)
+            return node->parent;
+        node = node->parent;
+    }
+
+    return NULL;
+}
+
+const char* piece_tree_get_node_start(const PieceTree* pt, const PTNode* node)
+{
+    GEM_ASSERT(pt != NULL);
+    GEM_ASSERT(node != SENTINEL);
+    GEM_ASSERT(in_valid_range(pt, node));
+    return (node->is_original ? pt->original.data : pt->added.data) + node->start;
+}
+
 static void print_node_contents(PieceTree* pt, PTNode* node)
 {
     if(!in_valid_range(pt, node) || ((PTInternNode*)node)->free)
         return;
 
     print_node_contents(pt, node->left);
-    size_t end = node->start + node->length;
-    for(size_t j = node->start; j < end; ++j)
-        putc(node->is_original ? pt->original.data[j] : pt->added.data[j], stdout);
+    const char* buf = piece_tree_get_node_start(pt, node);
+    for(size_t i = 0; i < node->length; ++i)
+        putc(buf[i], stdout);
     print_node_contents(pt, node->right);
 }
 
@@ -333,35 +388,6 @@ void piece_tree_print_tree(PieceTree* pt)
 {
     GEM_ASSERT(pt != NULL);
     print_node_metadata(pt, pt->root, 0);
-}
-
-// TODO: Change this when the 'text box' abstraction
-// is added so that the current pen location is stored.
-static float s_PenX, s_PenY;
-static PieceTree* s_Tree;
-static const GemQuad* s_Bounding;
-static void render_node(PTNode* node)
-{
-    if(node == SENTINEL)
-        return;
-
-    render_node(node->left);
-    gem_renderer_draw_str_at((node->is_original ? s_Tree->original.data : s_Tree->added.data) + node->start,
-                             node->length,
-                             s_Bounding, &s_PenX, &s_PenY);
-    render_node(node->right);
-}
-
-void piece_tree_render(PieceTree* pt, const GemQuad* bounding_box)
-{
-    GEM_ASSERT(pt != NULL);
-    if(pt->root == NULL)
-        return;
-    s_PenX = bounding_box->bottom_left[0];
-    s_PenY = bounding_box->top_right[1];
-    s_Tree = pt;
-    s_Bounding = bounding_box;
-    render_node(pt->root);
 }
 
 static PTNode* node_at_offset(PieceTree* pt, size_t offset, size_t* node_start_offset)
@@ -474,20 +500,20 @@ static void bubble_meta_changes(PieceTree* pt, PTNode* node, int64_t size_delta,
     }
 }
 
-static PTNode* left_test(PieceTree* pt, PTNode* node)
+static PTNode* left_test(const PieceTree* pt, const PTNode* node)
 {
     GEM_ASSERT(in_valid_range(pt, node));
     while(node->left != SENTINEL)
         node = node->left;
-    return node;
+    return (PTNode*)node;
 }
 
-static PTNode* right_test(PieceTree* pt, PTNode* node)
+static PTNode* right_test(const PieceTree* pt, const PTNode* node)
 {
     GEM_ASSERT(in_valid_range(pt, node));
     while(node->right != SENTINEL)
         node = node->right;
-    return node;
+    return (PTNode*)node;
 }
 
 static void fix_insert(PieceTree* pt, PTNode* node)
@@ -590,7 +616,7 @@ static inline void mark_free(PieceTree* pt, size_t start)
     }
 }
 
-static inline bool in_valid_range(PieceTree* pt, const PTNode* node)
+static inline bool in_valid_range(const PieceTree* pt, const PTNode* node)
 {
     const PTInternNode* n = (const PTInternNode*)node;
     return n >= pt->storage.data && n < (pt->storage.data + pt->storage.capacity);

@@ -136,6 +136,7 @@ void gem_window_dispatch_events(void)
         switch(ev.type)
         {
         case FocusIn: {
+            gem_app_redraw();
             s_Window.focused = true;
             break;
         }
@@ -165,14 +166,17 @@ void gem_window_dispatch_events(void)
         case KeyPress: {
             uint16_t keycode = s_KeyMap[scancode];
             if(keycode != GEM_KEY_NONE)
-                gem_app_key_press(keycode);
+                gem_app_key_press(keycode, ev.xkey.state);
             break;
         }
         }
     }
 
     if(prev_width != s_Window.width || prev_height != s_Window.height)
+    {
+        gem_app_redraw();
         gem_set_projection(s_Window.width, s_Window.height);
+    }
 }
 
 void gem_window_swap(void)
