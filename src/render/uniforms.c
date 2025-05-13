@@ -1,15 +1,14 @@
 #include "uniforms.h"
 #include "core/core.h"
 
-#include <cglm/cglm.h>
-#include <cglm/clipspace/ortho_rh_no.h>
-
 #include <glad/glad.h>
+
+#include <string.h>
 
 static GLuint s_UBO;
 static struct
 {
-    mat4 projection;
+    float projection[4][4];
 } s_Uniforms;
 
 void gem_uniforms_init(void)
@@ -17,12 +16,21 @@ void gem_uniforms_init(void)
     glCreateBuffers(1, &s_UBO);
     glNamedBufferData(s_UBO, sizeof(s_Uniforms), NULL, GL_DYNAMIC_DRAW);
     glBindBufferBase(GL_UNIFORM_BUFFER, 0, s_UBO);
+    memset(&s_Uniforms, 0, sizeof(s_Uniforms));
+    s_Uniforms.projection[2][2] = -1.0f;
+    s_Uniforms.projection[3][0] = -1.0f;
+    s_Uniforms.projection[3][1] =  1.0f;
+    s_Uniforms.projection[3][3] =  1.0f;
+
 }
+
+
 
 void gem_set_projection(int width, int height)
 {
     GEM_ASSERT(width > 0 && height > 0);
-    glm_ortho_rh_no(0.0f, (float)width, 0.0f, (float)height, -1.0f, 1.0f, s_Uniforms.projection);
+    s_Uniforms.projection[0][0] =  2.0f / (float)width;
+    s_Uniforms.projection[1][1] = -2.0f / (float)height;
     glNamedBufferSubData(s_UBO, 0, sizeof(s_Uniforms), &s_Uniforms);
     glViewport(0, 0, (GLsizei)width, (GLsizei)height);
 }

@@ -140,13 +140,15 @@
 #define GEM_MOUSE_BUTTON_1         1
 #define GEM_MOUSE_BUTTON_2         2
 #define GEM_MOUSE_BUTTON_3         3
-#define GEM_MOUSE_BUTTON_4         4
-#define GEM_MOUSE_BUTTON_5         5
-#define GEM_MOUSE_BUTTON_6         6
-#define GEM_MOUSE_BUTTON_7         7
-#define GEM_MOUSE_BUTTON_8         8
+#define GEM_MOUSE_BUTTON_4         8
+#define GEM_MOUSE_BUTTON_5         9
+#define GEM_MOUSE_BUTTON_6         10
+#define GEM_MOUSE_BUTTON_7         11
+#define GEM_MOUSE_BUTTON_8         12
+#define GEM_MOUSE_SCROLL_UP        4
+#define GEM_MOUSE_SCROLL_DOWN      5
 #define GEM_MOUSE_BUTTON_LAST      GEM_MOUSE_BUTTON_8
 #define GEM_MOUSE_BUTTON_LEFT      GEM_MOUSE_BUTTON_1
-#define GEM_MOUSE_BUTTON_RIGHT     GEM_MOUSE_BUTTON_2
-#define GEM_MOUSE_BUTTON_MIDDLE    GEM_MOUSE_BUTTON_3
+#define GEM_MOUSE_BUTTON_MIDDLE    GEM_MOUSE_BUTTON_2
+#define GEM_MOUSE_BUTTON_RIGHT     GEM_MOUSE_BUTTON_3
 

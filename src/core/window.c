@@ -126,7 +126,7 @@ void gem_window_dispatch_events(void)
     int prev_height = s_Window.height;
     XEvent ev;
 
-    while(XPending(s_Display) || !s_Window.focused)
+    while(!s_Window.focused || !gem_app_needs_redraw() || XPending(s_Display))
     {
         XNextEvent(s_Display, &ev);
         unsigned int scancode = ev.xkey.keycode;
@@ -136,7 +136,7 @@ void gem_window_dispatch_events(void)
         switch(ev.type)
         {
         case FocusIn: {
-            gem_app_redraw();
+            gem_app_request_redraw();
             s_Window.focused = true;
             break;
         }
@@ -149,6 +149,7 @@ void gem_window_dispatch_events(void)
             return;
         }
         case Expose: {
+            gem_app_request_redraw();
             s_Window.width = ev.xexpose.width;
             s_Window.height = ev.xexpose.height;
             break;
@@ -169,14 +170,18 @@ void gem_window_dispatch_events(void)
                 gem_app_key_press(keycode, ev.xkey.state);
             break;
         }
+        case ButtonPress: {
+            gem_app_mouse_press(ev.xbutton.button, ev.xbutton.state, ev.xbutton.x, ev.xbutton.y);
+            break;
+        }
+        case ButtonRelease: {
+            break;
+        }
         }
     }
 
     if(prev_width != s_Window.width || prev_height != s_Window.height)
-    {
-        gem_app_redraw();
         gem_set_projection(s_Window.width, s_Window.height);
-    }
 }
 
 void gem_window_swap(void)
