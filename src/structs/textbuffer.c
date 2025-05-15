@@ -37,6 +37,15 @@ void text_buffer_open_file(TextBuffer* buf, const char* filepath)
     }
 }
 
+static void clamp_val(int64_t* val, int64_t min, int64_t max)
+{
+    GEM_ASSERT(min <= max);
+    if(min == max || *val < min)
+        *val = min;
+    else if(*val > max)
+        *val = max;
+}
+
 void text_buffer_close(TextBuffer* buf)
 {
     GEM_ASSERT(buf != NULL);
@@ -49,11 +58,44 @@ void text_buffer_move_camera(TextBuffer* buf, int64_t line_delta)
     if(line_delta == 0)
         return;
 
-    size_t delta = line_delta < 0 ? 
-                        -MIN(-(size_t)line_delta, buf->camera_start_line) :
-                        MIN((size_t)line_delta, 
-                            buf->contents.line_cnt - 1 - buf->camera_start_line);
-    buf->camera_start_line += delta;
-    if(delta != 0 && buf->visible)
+    clamp_val(&line_delta, -buf->camera_start_line, buf->contents.line_cnt - 1 - buf->camera_start_line);
+    buf->camera_start_line += line_delta;
+    if(buf->visible && line_delta != 0)
         gem_app_request_redraw();
 }
+
+void text_buffer_move_cursor_line(TextBuffer* buf, int64_t line_delta)
+{
+    GEM_ASSERT(buf != NULL);
+    if(line_delta == 0)
+        return;
+
+    BufferPos* pos = &buf->cursor.pos;
+    clamp_val(&line_delta, -pos->line, buf->contents.line_cnt - 1 - pos->line);
+    if(line_delta != 0)
+    {
+        pos->line += line_delta;
+        pos->column = MIN((int64_t)piece_tree_get_line_length(&buf->contents, pos->line), buf->cursor.horiz);
+        buf->cursor.offset = piece_tree_get_offset_bp(&buf->contents, *pos);
+        if(buf->visible)
+            gem_app_request_redraw();
+    }
+}
+
+void text_buffer_move_cursor_horiz(TextBuffer* buf, int64_t horiz_delta)
+{
+    GEM_ASSERT(buf != NULL);
+    if(horiz_delta == 0)
+        return;
+
+    clamp_val(&horiz_delta, -buf->cursor.offset, buf->contents.size - buf->cursor.offset);
+    buf->cursor.offset += horiz_delta;
+    if(horiz_delta != 0)
+    {
+        buf->cursor.pos = piece_tree_get_buffer_pos(&buf->contents, buf->cursor.offset);
+        buf->cursor.horiz = buf->cursor.pos.column;
+        if(buf->visible)
+            gem_app_request_redraw();
+    }
+}
+

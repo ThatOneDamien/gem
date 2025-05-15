@@ -9,8 +9,8 @@ typedef struct PTNode PTNode;
 
 typedef struct
 {
-    size_t line;
-    size_t column;
+    int64_t line;
+    int64_t column;
 } BufferPos;
 
 struct alignas(1) PTNode
@@ -84,6 +84,12 @@ const PTNode* piece_tree_next_inorder(const PieceTree* pt, const PTNode* node);
 const char*   piece_tree_get_node_start(const PieceTree* pt, const PTNode* node);
 size_t        piece_tree_get_line_length(const PieceTree* pt, size_t line_num);
 size_t        piece_tree_get_offset(const PieceTree* pt, size_t line, size_t column);
+BufferPos     piece_tree_get_buffer_pos(const PieceTree* pt, size_t offset);
 
-void piece_tree_print_contents(PieceTree* pt);
-void piece_tree_print_tree    (PieceTree* pt);
+void piece_tree_print_contents(const PieceTree* pt);
+void piece_tree_print_tree    (const PieceTree* pt);
+
+static inline size_t piece_tree_get_offset_bp(const PieceTree* pt, BufferPos pos)
+{ 
+    return piece_tree_get_offset(pt, pos.line, pos.column);
+}

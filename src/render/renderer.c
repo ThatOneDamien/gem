@@ -199,6 +199,15 @@ void gem_renderer_draw_str_at(const char* str, size_t count, const GemQuad* boun
         handle_char(str[i], bounding_box, pen);
 }
 
+static void draw_cursor(const Cursor* cur, vec2pos pos)
+{
+    (void)cur;
+    GemQuad cursor_quad = make_quad(pos.x, pos.y + GEM_FONT_SIZE * 1.2f,
+                                    pos.x + s_Font.advance, pos.y);
+    draw_quad(&cursor_quad, NULL, (vec4color){1.0f, 1.0f, 1.0f, 0.4f}, true);
+
+}
+
 void gem_renderer_draw_buffer(const TextBuffer* buffer)
 {
     GEM_ASSERT(buffer != NULL);
@@ -245,34 +254,23 @@ void gem_renderer_draw_buffer(const TextBuffer* buffer)
     pen.y = text_bb.tr.y;
 
     size_t node_offset;
-    size_t current_line = buffer->camera_start_line;
-    size_t line_off = 0;
-    const PieceTree* pt = &buffer->contents;
-    const PTNode* node = piece_tree_node_at_line(pt, buffer->camera_start_line, &node_offset);
     const char* buf;
+    const PieceTree* pt = &buffer->contents;
+    size_t cur_off = piece_tree_get_offset(pt, buffer->camera_start_line, 0);
+    vec2pos cursor_pen = pen;
+    const PTNode* node = piece_tree_node_at_line(pt, buffer->camera_start_line, &node_offset);
 
     if(node == NULL)
-        return;
+        goto drawcursor;
 
     buf = piece_tree_get_node_start(pt, node) + node_offset;
     node_offset = node->length - node_offset;
     for(size_t i = 0; i < node_offset && pen.y < text_bb.bl.y; ++i)
     {
-        if(current_line == buffer->cursor.line &&
-           line_off == buffer->cursor.column)
-        {
-            GemQuad cursor_quad = make_quad(pen.x, pen.y + GEM_FONT_SIZE * 1.2f,
-                                            pen.x + s_Font.advance, pen.y);
-            draw_quad(&cursor_quad, NULL, (vec4color){1.0f, 1.0f, 1.0f, 0.4f}, true);
-        }
         handle_char(buf[i], &text_bb, &pen);
-        if(buf[i] == '\n')
-        {
-            current_line++;
-            line_off = 0;
-        }
-        else
-            line_off++;
+        cur_off++;
+        if(cur_off == buffer->cursor.offset)
+            cursor_pen = pen;
     }
 
     node = piece_tree_next_inorder(pt, node);
@@ -281,25 +279,15 @@ void gem_renderer_draw_buffer(const TextBuffer* buffer)
         buf = piece_tree_get_node_start(pt, node);
         for(size_t i = 0; i < node->length && pen.y < text_bb.bl.y; ++i)
         {
-            if(current_line == buffer->cursor.line &&
-               line_off == buffer->cursor.column)
-            {
-                GemQuad cursor_quad = make_quad(pen.x, pen.y + GEM_FONT_SIZE * 1.2f,
-                                                pen.x + s_Font.advance, pen.y);
-                draw_quad(&cursor_quad, NULL, (vec4color){1.0f, 1.0f, 1.0f, 0.4f}, true);
-            }
             handle_char(buf[i], &text_bb, &pen);
-            if(buf[i] == '\n')
-            {
-                current_line++;
-                line_off = 0;
-            }
-            else
-                line_off++;
+            cur_off++;
+            if(cur_off == buffer->cursor.offset)
+                cursor_pen = pen;
         }
         node = piece_tree_next_inorder(pt, node);
     }
-
+drawcursor:
+    draw_cursor(&buffer->cursor, cursor_pen);
 }
 
 static bool create_shader_program(const char* vert_path, const char* frag_path, GLuint* program_id)

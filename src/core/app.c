@@ -112,91 +112,33 @@ void gem_app_key_press(uint16_t keycode, uint32_t mods)
                     SHIFT_CONVERSION[keycode - GEM_KEY_SPACE] : 
                     (char)keycode;
         c[1] = '\0';
-        piece_tree_insert(&s_Buffer.contents, c, piece_tree_get_offset(&s_Buffer.contents, s_Buffer.cursor.line, s_Buffer.cursor.column));
-        ++s_Buffer.cursor.column;
+        piece_tree_insert(&s_Buffer.contents, c, s_Buffer.cursor.offset);
+        s_Buffer.cursor.pos.column++;
+        s_Buffer.cursor.offset++;
         s_Redraw = true;
     }
     else if(keycode == GEM_KEY_ENTER)
     {
         char c[2] = "\n\0";
-        piece_tree_insert(&s_Buffer.contents, c, piece_tree_get_offset(&s_Buffer.contents, s_Buffer.cursor.line, s_Buffer.cursor.column));
-        s_Buffer.cursor.line++;
-        s_Buffer.cursor.column = 0;
+        piece_tree_insert(&s_Buffer.contents, c, s_Buffer.cursor.offset);
+        s_Buffer.cursor.pos.line++;
+        s_Buffer.cursor.pos.column = 0;
+        s_Buffer.cursor.offset++;
         s_Redraw = true;
     }
-    else if(keycode == GEM_KEY_BACKSPACE && (s_Buffer.cursor.line != 0 || s_Buffer.cursor.column != 0))
+    else if(keycode == GEM_KEY_BACKSPACE && s_Buffer.cursor.offset > 0)
     {
-        piece_tree_delete(&s_Buffer.contents, piece_tree_get_offset(&s_Buffer.contents, s_Buffer.cursor.line, s_Buffer.cursor.column) - 1, 1);
-        if(s_Buffer.cursor.column > 0)
-            s_Buffer.cursor.column--;
-        else
-        {
-            s_Buffer.cursor.line--;
-            s_Buffer.cursor.column = piece_tree_get_line_length(&s_Buffer.contents, s_Buffer.cursor.line);
-        }
-        s_Redraw = true;
+        piece_tree_delete(&s_Buffer.contents, s_Buffer.cursor.offset - 1, 1);
+        text_buffer_move_cursor_horiz(&s_Buffer, -1);
     }
     else if(keycode == GEM_KEY_RIGHT)
-    {
-        size_t len = piece_tree_get_line_length(&s_Buffer.contents, s_Buffer.cursor.line);
-        if(s_Buffer.cursor.column < len)
-        {
-            s_Buffer.cursor.column++;
-            s_Redraw = true;
-        }
-        else if(s_Buffer.cursor.line < s_Buffer.contents.line_cnt)
-        {
-            s_Buffer.cursor.line++;
-            s_Buffer.cursor.column = 0;
-            s_Redraw = true;
-        }
-        printf("Cursor: %lu %lu\n", s_Buffer.cursor.line, s_Buffer.cursor.column);
-    }
+        text_buffer_move_cursor_horiz(&s_Buffer, 1);
     else if(keycode == GEM_KEY_LEFT)
-    {
-        if(s_Buffer.cursor.column > 0)
-        {
-            s_Buffer.cursor.column--;
-            s_Redraw = true;
-        }
-        else if(s_Buffer.cursor.line > 0)
-        {
-            s_Buffer.cursor.line--;
-            s_Buffer.cursor.column = piece_tree_get_line_length(&s_Buffer.contents, s_Buffer.cursor.line);
-            s_Redraw = true;
-        }
-        printf("Cursor: %lu %lu\n", s_Buffer.cursor.line, s_Buffer.cursor.column);
-    }
+        text_buffer_move_cursor_horiz(&s_Buffer, -1);
     else if(keycode == GEM_KEY_DOWN)
-    {
-        if(s_Buffer.cursor.line < s_Buffer.contents.line_cnt - 1)
-        {
-            s_Buffer.cursor.line++;
-            size_t len = piece_tree_get_line_length(&s_Buffer.contents, s_Buffer.cursor.line);
-            if(len < s_Buffer.cursor.column)
-                s_Buffer.cursor.column = len;
-        }
-        else
-            s_Buffer.cursor.column = piece_tree_get_line_length(&s_Buffer.contents, s_Buffer.cursor.line);
-
-        printf("Cursor: %lu %lu\n", s_Buffer.cursor.line, s_Buffer.cursor.column);
-        s_Redraw = true;
-    }
+        text_buffer_move_cursor_line(&s_Buffer, 1);
     else if(keycode == GEM_KEY_UP)
-    {
-        if(s_Buffer.cursor.line > 0)
-        {
-            s_Buffer.cursor.line--;
-            size_t len = piece_tree_get_line_length(&s_Buffer.contents, s_Buffer.cursor.line);
-            if(len < s_Buffer.cursor.column)
-                s_Buffer.cursor.column = len;
-        }
-        else
-            s_Buffer.cursor.column = 0;
-
-        printf("Cursor: %lu %lu\n", s_Buffer.cursor.line, s_Buffer.cursor.column);
-        s_Redraw = true;
-    }
+        text_buffer_move_cursor_line(&s_Buffer, -1);
 }
 
 void gem_app_mouse_press(uint32_t button, uint32_t mods, int x, int y)
