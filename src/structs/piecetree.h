@@ -29,6 +29,10 @@ struct alignas(1) PTNode
 
     bool       is_original;
     bool       is_black;
+
+#ifdef GEM_PT_VALIDATE
+    bool used;
+#endif
 };
 
 

@@ -12,11 +12,15 @@ HEADERS := $(shell find $(SRC_DIR) -name "*.h")
 DEBUG_OBJS := $(patsubst $(SRC_DIR)/%.c, $(INT_DIR)/debug/%.o, $(SRCS))
 RELEASE_OBJS := $(patsubst $(SRC_DIR)/%.c, $(INT_DIR)/release/%.o, $(SRCS))
 
-.PHONY: all debug release clean 
+.PHONY: all debug release clean validate
 
 debug: $(BUILD_DIR)/gemdb
 
 release: $(BUILD_DIR)/gem
+
+validate:: EXTRACFLAGS = -DGEM_PT_VALIDATE
+validate:: debug
+
 
 all: debug release
 
@@ -26,21 +30,21 @@ clean:
 
 $(BUILD_DIR)/gemdb: $(DEBUG_OBJS) $(INT_DIR)/dependencies/glad.o $(INT_DIR)/dependencies/stb_image.o 
 	@echo 'Linking gem (debug)'
-	@$(CC) $(CFLAGS) $(INC) $(LIBS) -DGEM_DEBUG -ggdb -o $@ $^
+	@$(CC) $(CFLAGS) $(EXTRACFLAGS) $(INC) $(LIBS) -DGEM_DEBUG -ggdb -o $@ $^
 
 $(BUILD_DIR)/gem: $(RELEASE_OBJS) $(INT_DIR)/dependencies/glad.o $(INT_DIR)/dependencies/stb_image.o
 	@echo 'Linking gem (release)'
-	@$(CC) $(CFLAGS) $(INC) $(LIBS) -O3 -o $@ $^
+	@$(CC) $(CFLAGS) $(EXTRACFLAGS) $(INC) $(LIBS) -O3 -o $@ $^
 
 $(DEBUG_OBJS): $(INT_DIR)/debug/%.o: $(SRC_DIR)/%.c $(HEADERS)
 	@mkdir -p $(dir $@)
 	@echo 'Making $@ (debug)'
-	@$(CC) $(CFLAGS) $(INC) -DGEM_DEBUG -ggdb -o $@ -c $<
+	@$(CC) $(CFLAGS) $(EXTRACFLAGS) $(INC) -DGEM_DEBUG -ggdb -o $@ -c $<
 
 $(RELEASE_OBJS): $(INT_DIR)/release/%.o: $(SRC_DIR)/%.c $(HEADERS)
 	@mkdir -p $(dir $@)
 	@echo 'Making $@ (release)'
-	@$(CC) $(CFLAGS) $(INC) -O3 -o $@ -c $<
+	@$(CC) $(CFLAGS) $(EXTRACFLAGS) $(INC) -O3 -o $@ -c $<
 
 $(INT_DIR)/dependencies/glad.o: dependencies/glad/src/glad.c
 	@mkdir -p $(dir $@)
