@@ -24,11 +24,12 @@ static PTNode* alloc_node(PieceTree* pt);
 static void    free_node(PieceTree* pt, PTNode* node);
 static void    expand_node_storage(PieceTree* pt, size_t capacity);
 static size_t  get_newln_count(const char* str, size_t len);
-static void    bubble_meta_changes(PieceTree* pt, PTNode* node, int64_t size_delta, int64_t newln_delta);
+static void    bubble_meta_changes(PieceTree* pt, PTNode* node, PTNode* stop, int64_t size_delta, int64_t newln_delta);
 static PTNode  create_node_and_append(PieceTree* pt, const char* str, size_t len);
 
 static PTNode*   split_node(PieceTree* pt, PTNode* node, size_t left_size, size_t right_size);
 static BufferPos position_in_buffer(const PieceTree* pt, PTNode* node, size_t offset);
+static PTNode*   next(PieceTree* pt, PTNode* node);
 static PTNode*   left_test(const PTNode* node);
 static PTNode*   right_test(const PTNode* node);
 static void      fix_insert(PieceTree* pt, PTNode* node);
@@ -160,7 +161,7 @@ void piece_tree_insert(PieceTree* pt, const char* str, size_t offset)
         *new = new_node;
         new->parent = node;
         node->left = new;
-        bubble_meta_changes(pt, new, new->length, new->nl_cnt);
+        bubble_meta_changes(pt, new, pt->root, new->length, new->nl_cnt);
         fix_insert(pt, new);
         PT_VALIDATE(pt);
         return;
@@ -201,14 +202,14 @@ void piece_tree_insert(PieceTree* pt, const char* str, size_t offset)
         {
             node->right = new;
             new->parent = node;
-            bubble_meta_changes(pt, node, new->length, new->nl_cnt);
+            bubble_meta_changes(pt, node, pt->root, new->length, new->nl_cnt);
         }
         else
         {
             PTNode* leftmost = left_test(node->right);
             leftmost->left = new;
             new->parent = leftmost;
-            bubble_meta_changes(pt, new, new->length, new->nl_cnt);
+            bubble_meta_changes(pt, new, pt->root, new->length, new->nl_cnt);
         }
         fix_insert(pt, new);
     }
@@ -218,7 +219,7 @@ void piece_tree_insert(PieceTree* pt, const char* str, size_t offset)
         node->end = new_node.end;
         node->length += len;
         node->nl_cnt += new_node.nl_cnt;
-        bubble_meta_changes(pt, node, len, new_node.nl_cnt);
+        bubble_meta_changes(pt, node, pt->root, len, new_node.nl_cnt);
     }
     else // Insert to the right of node
     {
@@ -228,14 +229,14 @@ void piece_tree_insert(PieceTree* pt, const char* str, size_t offset)
         {
             node->right = new;
             new->parent = node;
-            bubble_meta_changes(pt, node, new->length, new->nl_cnt);
+            bubble_meta_changes(pt, node, pt->root, new->length, new->nl_cnt);
         }
         else
         {
             PTNode* leftmost = left_test(node->right);
             leftmost->left = new;
             new->parent = leftmost;
-            bubble_meta_changes(pt, new, new->length, new->nl_cnt);
+            bubble_meta_changes(pt, new, pt->root, new->length, new->nl_cnt);
         }
         fix_insert(pt, new);
     }
@@ -276,7 +277,7 @@ void piece_tree_delete(PieceTree* pt, size_t offset, size_t count)
             size_t prev_nl_cnt = start->nl_cnt;
             start->nl_cnt = start->end.line - start->start.line;
             start->length -= count;
-            bubble_meta_changes(pt, start, -count, start->nl_cnt - prev_nl_cnt);
+            bubble_meta_changes(pt, start, pt->root, -count, start->nl_cnt - prev_nl_cnt);
             pt->size -= count;
             pt->line_cnt -= prev_nl_cnt - start->nl_cnt;
             PT_VALIDATE(pt);
@@ -289,7 +290,7 @@ void piece_tree_delete(PieceTree* pt, size_t offset, size_t count)
             size_t prev_nl_cnt = start->nl_cnt;
             start->nl_cnt = start->end.line - start->start.line;
             start->length -= count;
-            bubble_meta_changes(pt, start, -count, start->nl_cnt - prev_nl_cnt);
+            bubble_meta_changes(pt, start, pt->root, -count, start->nl_cnt - prev_nl_cnt);
             pt->size -= count;
             pt->line_cnt -= prev_nl_cnt - start->nl_cnt;
             PT_VALIDATE(pt);
@@ -319,12 +320,52 @@ void piece_tree_delete(PieceTree* pt, size_t offset, size_t count)
             split->parent = leftmost;
         }
         int64_t nl_delta = start->nl_cnt + split->nl_cnt - prev_nl_cnt;
-        bubble_meta_changes(pt, start, -(split->length + count), nl_delta);
+        bubble_meta_changes(pt, start, pt->root, -count, nl_delta);
         fix_insert(pt, split);
         pt->size -= count;
         pt->line_cnt += nl_delta;
+        PT_VALIDATE(pt);
+        return;
     }
+
+    start->start = position_in_buffer(pt, start, offset - start_offset);
+    size_t prev_nl_cnt = start->nl_cnt;
+    start->nl_cnt = start->end.line - start->start.line;
+    start->length -= count;
+    bubble_meta_changes(pt, start, pt->root, -count, start->nl_cnt - prev_nl_cnt);
+    pt->line_cnt -= prev_nl_cnt - start->nl_cnt;
+
+    end->end = position_in_buffer(pt, end, offset - end_offset);
+    prev_nl_cnt = end->nl_cnt;
+    end->nl_cnt = end->end.line - end->start.line;
+    end->length -= count;
+    bubble_meta_changes(pt, end, pt->root, -count, end->nl_cnt - prev_nl_cnt);
+    pt->line_cnt -= prev_nl_cnt - end->nl_cnt;
+
+    struct {
+        PTNode** data;
+        size_t capacity;
+        size_t size;
+    } nodes_to_del;
+
+    da_init(&nodes_to_del, 10);
+    PTNode* cur = next(pt, start);
+    while(cur != SENTINEL && cur != end)
+    {
+        da_append(&nodes_to_del, cur);
+        cur = next(pt, cur);
+    }
+
+    printf("Deleting %lu nodes at a time.\n", nodes_to_del.size);
+    for(size_t i = 0; i < nodes_to_del.size; ++i)
+    {
+        pt->line_cnt -= nodes_to_del.data[i]->nl_cnt;
+        delete_node(pt, nodes_to_del.data[i]);
+    }
+
+    pt->size -= count;
     PT_VALIDATE(pt);
+    
 }
 
 const PTNode* piece_tree_node_at_line(const PieceTree* pt, size_t line, size_t* node_offset)
@@ -373,20 +414,13 @@ const PTNode* piece_tree_node_at_line(const PieceTree* pt, size_t line, size_t* 
 const PTNode* piece_tree_next_inorder(const PieceTree* pt, const PTNode* node)
 {
     GEM_ASSERT(pt != NULL);
+    if(node == NULL)
+        return pt->root == SENTINEL ? NULL : left_test(pt->root);
     GEM_ASSERT(node != SENTINEL);
     GEM_ASSERT(in_valid_range(pt, node));
 
-    if(node->right != SENTINEL)
-        return left_test(node->right);
-    
-    while(node != pt->root)
-    {
-        if(node == node->parent->left)
-            return node->parent;
-        node = node->parent;
-    }
-
-    return NULL;
+    PTNode* n = next((PieceTree*)pt, (PTNode*)node);
+    return n == SENTINEL ? NULL : n;
 }
 
 const char* piece_tree_get_node_start(const PieceTree* pt, const PTNode* node)
@@ -646,10 +680,11 @@ static size_t get_newln_count(const char* str, size_t len)
     return cnt;
 }
 
-static void bubble_meta_changes(PieceTree* pt, PTNode* node, int64_t size_delta, int64_t newln_delta)
+static void bubble_meta_changes(PieceTree* pt, PTNode* node, PTNode* stop,
+                                int64_t size_delta, int64_t newln_delta)
 {
-    GEM_ASSERT(in_valid_range(pt, node));
-    while(node->parent != SENTINEL)
+    GEM_ASSERT(node == SENTINEL || in_valid_range(pt, node));
+    while(node != stop && node->parent != SENTINEL)
     {
         if(node == node->parent->left)
         {
@@ -702,7 +737,7 @@ static PTNode* split_node(PieceTree* pt, PTNode* node, size_t left_size, size_t 
 
     node->end = position_in_buffer(pt, node, left_size);
     node->length = left_size;
-    node->nl_cnt -= split->nl_cnt;
+    node->nl_cnt = node->end.line - node->start.line;
     return split;
 }
 
@@ -739,6 +774,20 @@ static BufferPos position_in_buffer(const PieceTree* pt, PTNode* node, size_t of
     };
 }
 
+static PTNode* next(PieceTree* pt, PTNode* node)
+{
+    if(node->right != SENTINEL)
+        return left_test(node->right);
+    
+    while(node != pt->root)
+    {
+        if(node == node->parent->left)
+            return node->parent;
+        node = node->parent;
+    }
+
+    return SENTINEL;
+}
 
 static PTNode* left_test(const PTNode* node)
 {
@@ -845,7 +894,6 @@ static void right_rotate(PieceTree* pt, PTNode* node)
 
 static void delete_node(PieceTree* pt, PTNode* node)
 {
-    printf("Deleting node case ");
     GEM_ASSERT(node != SENTINEL);
     GEM_ASSERT(in_valid_range(pt, node));
     PTNode* x;
@@ -853,26 +901,22 @@ static void delete_node(PieceTree* pt, PTNode* node)
 
     if(node->left == SENTINEL)
     {
-        printf("1\n");
         y = node;
         x = node->right;
     }
     else if(node->right == SENTINEL)
     {
-        printf("2\n");
         y = node;
         x = node->left;
     }
     else
     {
-        printf("3\n");
         y = left_test(node->right);
         x = y->right;
     }
 
     if(y == pt->root)
     {
-        printf("Here1\n");
         pt->root = x;
         x->parent = SENTINEL;
         x->is_black = true;
@@ -883,21 +927,29 @@ static void delete_node(PieceTree* pt, PTNode* node)
     bool y_red = !y->is_black;
 
     if(y == y->parent->left)
+    {
         y->parent->left = x;
+        y->parent->left_size -= y->length;
+        y->parent->left_nl_cnt -= y->nl_cnt;
+    }
     else
         y->parent->right = x;
 
     if(y == node)
     {
-        printf("Here2\n");
         x->parent = y->parent;
-        bubble_meta_changes(pt, y, -y->length, -y->nl_cnt);
+        bubble_meta_changes(pt, x->parent, pt->root, -y->length, -y->nl_cnt);
     }
     else
     {
-        printf("Here3\n");
-        x->parent = y->parent == node ? y : y->parent;
-        // recompute metadata
+        if(y->parent == node)
+            x->parent = y;
+        else
+        {
+            x->parent = y->parent;
+            bubble_meta_changes(pt, x->parent, node->right, -y->length, -y->nl_cnt);
+        }
+
         
         y->left = node->left;
         y->right = node->right;
@@ -918,18 +970,11 @@ static void delete_node(PieceTree* pt, PTNode* node)
 
         y->left_size = node->left_size;
         y->left_nl_cnt = node->left_nl_cnt;
-        // recompute metadata
-
-        if(x == x->parent->left)
-        {
-            //update newlines and left size
-        }
-
+        bubble_meta_changes(pt, y, pt->root, -node->length, -node->nl_cnt);
     }
 
     free_node(pt, node);
 
-    // recompute metadata
     if(y_red)
     {
         SENTINEL->parent = SENTINEL;

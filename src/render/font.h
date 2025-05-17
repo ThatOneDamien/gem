@@ -4,11 +4,11 @@
 #include <glad/glad.h>
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #define GEM_PRINTABLE_ASCII_START 33
 #define GEM_PRINTABLE_ASCII_END   127
 #define GEM_GLYPH_CNT             (GEM_PRINTABLE_ASCII_END - GEM_PRINTABLE_ASCII_START + 1)
-#define GEM_FONT_SIZE             20
 
 typedef struct
 {
@@ -26,6 +26,13 @@ typedef struct
     GLuint atlas_texture;
 } GemFont;
 
-void gem_freetype_init(void);
-bool gem_gen_font_atlas(const char* font_path, GemFont* font);
-void gem_freetype_cleanup(void);
+void  gem_freetype_init(void);
+bool  gem_gen_font_atlas(const char* font_path, GemFont* font);
+void  gem_freetype_cleanup(void);
+
+size_t gem_get_font_size(void);
+float  gem_get_line_height(void);
+float  gem_get_vert_advance(void);
+
+void gem_set_font_size(size_t font_size);
+void gem_set_line_height(float line_height);

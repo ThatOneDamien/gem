@@ -3,7 +3,7 @@
 #include "keycode.h"
 #include "timing.h"
 #include "window.h"
-#include "file/file.h"
+#include "fileman/fileio.h"
 #include "render/font.h"
 #include "render/renderer.h"
 #include "render/uniforms.h"
@@ -101,6 +101,31 @@ void gem_app_key_press(uint16_t keycode, uint32_t mods)
         else if(keycode == GEM_KEY_T)
         {
             piece_tree_print_tree(&s_Buffer.contents);
+        }
+        else if(keycode == GEM_KEY_S)
+        {
+            if(gem_write_text_buffer(&s_Buffer, "temp.txt"))
+                printf("Wrote %lu bytes to temp.txt\n", s_Buffer.contents.size);
+            else
+                printf("Failed to write to temp.txt\n");
+        }
+        else if(keycode == GEM_KEY_D && mods & GEM_MOD_SHIFT && s_Buffer.contents.size > 0)
+        {
+            size_t start = s_Buffer.cursor.offset - s_Buffer.cursor.pos.column;
+            size_t count = piece_tree_get_line_length(&s_Buffer.contents, s_Buffer.cursor.pos.line) + 1;
+            if(s_Buffer.cursor.pos.line == (int64_t)s_Buffer.contents.line_cnt - 1)
+            {
+                if(s_Buffer.cursor.pos.line == 0)
+                    count--;
+                else
+                {
+                    text_buffer_move_cursor_line(&s_Buffer, -1);
+                    start--;
+                }
+            }
+            printf("here start: %lu count: %lu\n", start, count);
+            piece_tree_delete(&s_Buffer.contents, start, count);
+            s_Redraw = true;
         }
         return;
     }

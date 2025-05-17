@@ -8,10 +8,16 @@
 
 #include <glad/glad.h>
 
+#include <math.h>
+
 // TODO: Change this to a dynamic system
 #define ATLAS_ROWS    8
 #define ATLAS_COLUMNS 12
 #define ATLAS_OFFSET  10
+
+#define DEFAULT_FONT_SIZE   20
+#define DEFAULT_LINE_HEIGHT 1.2f
+#define DEFAULT_VERT_ADV    24.0f
 
 #define CHECK_FT_OR_RET(to_check, ret_val) \
     if((to_check) != FT_Err_Ok)            \
@@ -23,9 +29,13 @@
     if((to_check) != FT_Err_Ok)           \
         goto label;
 
-static FT_Library s_Library;
 static const FT_Int32 LOAD_FLAGS = FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING;
 static const FT_Int32 RENDER_FLAGS = FT_RENDER_MODE_NORMAL;
+
+static FT_Library s_Library;
+static size_t s_FontSize = DEFAULT_FONT_SIZE; // For now only one font size is allowed globally
+static float s_LineHeight = DEFAULT_LINE_HEIGHT;
+static float s_VertAdvance = DEFAULT_VERT_ADV;
 
 void gem_freetype_init(void)
 {
@@ -90,8 +100,7 @@ bool gem_gen_font_atlas(const char* font_path, GemFont* font)
     FT_Face face;
     bool result = false;
     CHECK_FT_OR_RET(FT_New_Face(s_Library, font_path, 0, &face), false);
-    CHECK_FT_OR_GOTO(FT_Set_Pixel_Sizes(face, GEM_FONT_SIZE, 0), clean);
-
+    CHECK_FT_OR_GOTO(FT_Set_Pixel_Sizes(face, s_FontSize, 0), clean);
 
     size_t cell_width, cell_height;
     if(!get_cell_dims(face, &cell_width, &cell_height))
@@ -151,4 +160,34 @@ void gem_freetype_cleanup(void)
 {
     FT_Error err = FT_Done_FreeType(s_Library);
     GEM_ENSURE_ARGS(err == FT_Err_Ok, "Freetype closed unsuccessfully (error code: %d).", err);
+}
+
+size_t gem_get_font_size(void)
+{
+    return s_FontSize;
+}
+
+float gem_get_line_height(void)
+{
+    return s_LineHeight;
+}
+
+float gem_get_vert_advance(void)
+{
+    return s_VertAdvance;
+}
+
+void gem_set_font_size(size_t font_size)
+{
+    s_FontSize = font_size;
+    // This should also recreate the atlases with the new
+    // font size, but in reality this is not a good way 
+    // of doing this at all, so this is temporary.
+    s_VertAdvance = roundf((float)s_FontSize * s_LineHeight);
+}
+
+void gem_set_line_height(float line_height)
+{
+    s_LineHeight = line_height;
+    s_VertAdvance = roundf((float)s_FontSize * s_LineHeight);
 }

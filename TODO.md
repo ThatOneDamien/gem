@@ -1,7 +1,5 @@
 # List of things to do for the editor that I can think of.
 
-- Finish piece tree delete function
-- Get the font height and use it for getting the line height
 - Add a cache for the piece tree
 - Add file manager of some sorts to naviagate files on disk
 - Expand upon the current renderer to allow for more customizable text rendering
