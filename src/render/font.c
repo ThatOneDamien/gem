@@ -17,7 +17,7 @@
 
 #define DEFAULT_FONT_SIZE   20
 #define DEFAULT_LINE_HEIGHT 1.2f
-#define DEFAULT_VERT_ADV    24.0f
+#define DEFAULT_VERT_ADV    (int)((float)DEFAULT_FONT_SIZE * DEFAULT_LINE_HEIGHT)
 
 #define CHECK_FT_OR_RET(to_check, ret_val) \
     if((to_check) != FT_Err_Ok)            \
@@ -33,9 +33,9 @@ static const FT_Int32 LOAD_FLAGS = FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING;
 static const FT_Int32 RENDER_FLAGS = FT_RENDER_MODE_NORMAL;
 
 static FT_Library s_Library;
-static size_t s_FontSize = DEFAULT_FONT_SIZE; // For now only one font size is allowed globally
+static int s_FontSize = DEFAULT_FONT_SIZE; // For now only one font size is allowed globally
 static float s_LineHeight = DEFAULT_LINE_HEIGHT;
-static float s_VertAdvance = DEFAULT_VERT_ADV;
+static int s_VertAdvance = DEFAULT_VERT_ADV;
 
 void gem_freetype_init(void)
 {
@@ -79,10 +79,12 @@ GemGlyphData put_glyph_in_atlas(uint8_t* atlas, size_t tex_width, size_t tex_hei
         .height = bmp->rows,
         .xoff = glyph->bitmap_left,
         .yoff = glyph->bitmap_top,
-        .tex_coords = make_quad(x / tw,
-                                (y + (float)bmp->rows) / th,
-                                (x + bmp->width) / tw,
-                                y / th)
+        .tex_coords = {
+            x / tw,
+            (y + (float)bmp->rows) / th,
+            (x + bmp->width) / tw,
+            y / th
+        }
     };
 
     for(uint32_t row = 0; row < bmp->rows; ++row)
@@ -162,7 +164,7 @@ void gem_freetype_cleanup(void)
     GEM_ENSURE_ARGS(err == FT_Err_Ok, "Freetype closed unsuccessfully (error code: %d).", err);
 }
 
-size_t gem_get_font_size(void)
+int gem_get_font_size(void)
 {
     return s_FontSize;
 }
@@ -172,7 +174,7 @@ float gem_get_line_height(void)
     return s_LineHeight;
 }
 
-float gem_get_vert_advance(void)
+int gem_get_vert_advance(void)
 {
     return s_VertAdvance;
 }
@@ -183,11 +185,11 @@ void gem_set_font_size(size_t font_size)
     // This should also recreate the atlases with the new
     // font size, but in reality this is not a good way 
     // of doing this at all, so this is temporary.
-    s_VertAdvance = roundf((float)s_FontSize * s_LineHeight);
+    s_VertAdvance = (int)((float)s_FontSize * s_LineHeight);
 }
 
 void gem_set_line_height(float line_height)
 {
     s_LineHeight = line_height;
-    s_VertAdvance = roundf((float)s_FontSize * s_LineHeight);
+    s_VertAdvance = (int)((float)s_FontSize * s_LineHeight);
 }

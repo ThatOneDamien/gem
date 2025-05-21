@@ -103,6 +103,12 @@ void gem_window_create(uint32_t width, uint32_t height)
     s_DeleteWindowAtom = XInternAtom(s_Display, "WM_DELETE_WINDOW", False);
     XSetWMProtocols(s_Display, s_Window.handle, &s_DeleteWindowAtom, 1);
 
+    XSizeHints sizeHints;
+    sizeHints.flags = PMinSize;
+    sizeHints.min_width = 400;
+    sizeHints.min_height = 400;
+    XSetWMNormalHints(s_Display, s_Window.handle, &sizeHints);
+
     int version = gladLoadGLLoader((GLADloadproc)glXGetProcAddressARB);
     GEM_ENSURE_MSG(version != 0, "Failed to load OpenGL function pointers.");
 

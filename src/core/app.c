@@ -43,6 +43,7 @@ void gem_app_init(const char* file_to_open)
         text_buffer_open_file(&s_Buffer, file_to_open);
 
     s_Buffer.visible = true;
+    s_Buffer.text_padding = (GemPadding){ 0.0f, 0.0f, 10.0f, 0.0f };
     s_Running = false;
     s_Redraw = false;
 }
@@ -57,11 +58,18 @@ void gem_app_run(void)
     {
         if(s_Redraw)
         {
-            int width, height;
-            gem_window_get_dims(&width, &height);
+            int iw, ih;
+            gem_window_get_dims(&iw, &ih);
             glClear(GL_COLOR_BUFFER_BIT);
-            s_Buffer.bounding_box.tr.x = (float)width;
-            s_Buffer.bounding_box.bl.y = (float)height;
+            float w = (float)iw;
+            float h = (float)ih;
+            if(s_Buffer.bounding_box.tr.x != w ||
+               s_Buffer.bounding_box.bl.y != h)
+            {
+                s_Buffer.bounding_box.tr.x = w;
+                s_Buffer.bounding_box.bl.y = h;
+                text_buffer_update_view(&s_Buffer);
+            }
             gem_renderer_start_batch();
             gem_renderer_draw_buffer(&s_Buffer);
             gem_renderer_render_batch();
@@ -111,20 +119,25 @@ void gem_app_key_press(uint16_t keycode, uint32_t mods)
         }
         else if(keycode == GEM_KEY_D && mods & GEM_MOD_SHIFT && s_Buffer.contents.size > 0)
         {
-            size_t start = s_Buffer.cursor.offset - s_Buffer.cursor.pos.column;
-            size_t count = piece_tree_get_line_length(&s_Buffer.contents, s_Buffer.cursor.pos.line) + 1;
-            if(s_Buffer.cursor.pos.line == (int64_t)s_Buffer.contents.line_cnt - 1)
+            Cursor* c = &s_Buffer.cursor;
+            size_t start = c->offset - c->pos.column;
+            size_t count = piece_tree_get_line_length(&s_Buffer.contents, c->pos.line) + 1;
+            bool go_down = false;
+            if(c->pos.line == (int64_t)s_Buffer.contents.line_cnt - 1)
             {
-                if(s_Buffer.cursor.pos.line == 0)
+                if(c->pos.line == 0)
                     count--;
                 else
                 {
-                    text_buffer_move_cursor_line(&s_Buffer, -1);
                     start--;
+                    go_down = true;
                 }
             }
-            printf("here start: %lu count: %lu\n", start, count);
             piece_tree_delete(&s_Buffer.contents, start, count);
+            if(go_down)
+                text_buffer_move_cursor_line(&s_Buffer, -1);
+            else
+                text_buffer_cursor_refresh(&s_Buffer);
             s_Redraw = true;
         }
         return;
@@ -132,23 +145,17 @@ void gem_app_key_press(uint16_t keycode, uint32_t mods)
 
     if(keycode >= GEM_KEY_SPACE && keycode <= GEM_KEY_Z)
     {
-        char c[2];
-        c[0] = mods & GEM_MOD_SHIFT ? 
+        char c = mods & GEM_MOD_SHIFT ? 
                     SHIFT_CONVERSION[keycode - GEM_KEY_SPACE] : 
                     (char)keycode;
-        c[1] = '\0';
-        piece_tree_insert(&s_Buffer.contents, c, s_Buffer.cursor.offset);
-        s_Buffer.cursor.pos.column++;
-        s_Buffer.cursor.offset++;
+        piece_tree_insert_char(&s_Buffer.contents, c, s_Buffer.cursor.offset);
+        text_buffer_move_cursor_horiz(&s_Buffer, 1);
         s_Redraw = true;
     }
     else if(keycode == GEM_KEY_ENTER)
     {
-        char c[2] = "\n\0";
-        piece_tree_insert(&s_Buffer.contents, c, s_Buffer.cursor.offset);
-        s_Buffer.cursor.pos.line++;
-        s_Buffer.cursor.pos.column = 0;
-        s_Buffer.cursor.offset++;
+        piece_tree_insert_char(&s_Buffer.contents, '\n', s_Buffer.cursor.offset);
+        text_buffer_set_cursor(&s_Buffer, s_Buffer.cursor.pos.line + 1, 0);
         s_Redraw = true;
     }
     else if(keycode == GEM_KEY_BACKSPACE && s_Buffer.cursor.offset > 0)
@@ -172,9 +179,9 @@ void gem_app_mouse_press(uint32_t button, uint32_t mods, int x, int y)
     (void)x;
     (void)y;
     if(button == GEM_MOUSE_SCROLL_DOWN)
-        text_buffer_move_camera(&s_Buffer, 3);
+        text_buffer_move_view(&s_Buffer, 3);
     else if(button == GEM_MOUSE_SCROLL_UP)
-        text_buffer_move_camera(&s_Buffer, -3);
+        text_buffer_move_view(&s_Buffer, -3);
 }
 
 void gem_app_request_redraw(void)

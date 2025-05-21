@@ -2,8 +2,8 @@
 
 typedef struct
 {
-    float x;
-    float y;
+    int x;
+    int y;
 } vec2pos;
 
 typedef struct
@@ -20,7 +20,15 @@ typedef struct
     vec2pos tr;
 } GemQuad;
 
-static inline GemQuad make_quad(float x1, float y1, float x2, float y2)
+typedef struct
+{
+    int bottom;
+    int top;
+    int left;
+    int right;
+} GemPadding;
+
+static inline GemQuad make_quad(int x1, int y1, int x2, int y2)
 {
     GemQuad res;
     res.bl.x = x1;

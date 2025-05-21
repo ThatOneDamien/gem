@@ -1,8 +1,10 @@
 #include "piecetree.h"
+#include "da.h"
 #include "core/core.h"
 
-#include <limits.h>
 #include <string.h>
+
+#define PT_INVALID UINT64_MAX
 
 #ifdef GEM_PT_VALIDATE
 static void validate_tree(const PieceTree* pt);
@@ -11,42 +13,42 @@ static void validate_tree(const PieceTree* pt);
     #define PT_VALIDATE(pt)
 #endif
 
-
-struct alignas(8) PTInternNode
+typedef struct __PTNodeIntern NodeIntern;
+struct alignas(8) __PTNodeIntern
 {
     PTNode node;
     bool   free;
+    size_t next;
 };
 
-
-static PTNode* node_at_offset(PieceTree* pt, size_t offset, size_t* node_start_offset, bool tail);
-static PTNode* alloc_node(PieceTree* pt);
-static void    free_node(PieceTree* pt, PTNode* node);
-static void    expand_node_storage(PieceTree* pt, size_t capacity);
-static size_t  get_newln_count(const char* str, size_t len);
+static PTNode* split_node(PieceTree* pt, PTNode* node, size_t left_size, size_t right_size);
+static void    fix_insert(PieceTree* pt, PTNode* node);
+static void    left_rotate(PieceTree* pt, PTNode* node);
+static void    right_rotate(PieceTree* pt, PTNode* node);
+static void    delete_node(PieceTree* pt, PTNode* node);
 static void    bubble_meta_changes(PieceTree* pt, PTNode* node, PTNode* stop, int64_t size_delta, int64_t newln_delta);
-static PTNode  create_node_and_append(PieceTree* pt, const char* str, size_t len);
+static PTNode* create_node_and_append(PieceTree* pt, const char* str, size_t len);
 
-static PTNode*   split_node(PieceTree* pt, PTNode* node, size_t left_size, size_t right_size);
+static PTNode*   node_at_offset(PieceTree* pt, size_t offset, size_t* node_start_offset, bool tail);
 static BufferPos position_in_buffer(const PieceTree* pt, PTNode* node, size_t offset);
 static PTNode*   next(PieceTree* pt, PTNode* node);
 static PTNode*   left_test(const PTNode* node);
 static PTNode*   right_test(const PTNode* node);
-static void      fix_insert(PieceTree* pt, PTNode* node);
-static void      left_rotate(PieceTree* pt, PTNode* node);
-static void      right_rotate(PieceTree* pt, PTNode* node);
-static void      delete_node(PieceTree* pt, PTNode* node);
+
+static PTNode* alloc_node(PieceTree* pt);
+static void    free_node(PieceTree* pt, PTNode* node);
+static void    expand_node_storage(PieceTree* pt, size_t capacity);
 
 static inline void   mark_free(PieceTree* pt, size_t start);
-static inline bool   in_valid_range(const PieceTree* pt, const PTNode* node);
+static inline bool   is_valid_node(const PieceTree* pt, const PTNode* node);
 static inline size_t node_id(const PieceTree* pt, const PTNode* node);
 static inline PTNode node_default(void);
 
-static PTNode s_Sentinel = (PTNode){
-    .left        = &s_Sentinel,
-    .right       = &s_Sentinel,
-    .parent      = &s_Sentinel,
-    .is_black    = true,
+static PTNode s_Sentinel = {
+    .left     = &s_Sentinel,
+    .right    = &s_Sentinel,
+    .parent   = &s_Sentinel,
+    .is_black = true
 };
 static PTNode* const SENTINEL = &s_Sentinel;
 
@@ -56,12 +58,12 @@ void piece_tree_init(PieceTree* pt, const char* original_src, size_t size, bool 
     GEM_ASSERT(pt != NULL);
     memset(pt, 0, sizeof(PieceTree));
 
-    pt->storage.capacity = 10; 
-    pt->storage.data = malloc(pt->storage.capacity * sizeof(PTInternNode));
+    pt->storage.capacity = 10;
+    pt->storage.nodes = malloc(sizeof(NodeIntern) * pt->storage.capacity);
+    pt->storage.free_head = PT_INVALID;
 
     // TODO: Replace the 0 initial capacities with something more reasonable
     // to start with.
-    da_init(&pt->free_list, pt->storage.capacity);
     da_init(&pt->added, 0);
     da_init(&pt->added.line_starts, 0);
     da_append(&pt->added.line_starts, 0);
@@ -72,6 +74,7 @@ void piece_tree_init(PieceTree* pt, const char* original_src, size_t size, bool 
     if(pt->size == 0)
     {
         pt->root = SENTINEL;
+        pt->storage.free_count = 10;
         mark_free(pt, 0);
         return;
     }
@@ -85,9 +88,13 @@ void piece_tree_init(PieceTree* pt, const char* original_src, size_t size, bool 
     else
         pt->original.data = original_src;
 
-
+    pt->storage.free_count = 9;
     mark_free(pt, 1);
-    pt->line_cnt = get_newln_count(pt->original.data, size) + 1;
+
+    for(size_t i = 0; i < size; ++i)
+        if(pt->original.data[i] == '\n')
+            pt->line_cnt++;
+
     pt->original.line_cnt = pt->line_cnt;
     pt->original.line_starts = malloc(sizeof(size_t) * pt->original.line_cnt);
     GEM_ENSURE(pt->original.line_starts != NULL);
@@ -101,7 +108,7 @@ void piece_tree_init(PieceTree* pt, const char* original_src, size_t size, bool 
             ls++;
         }
 
-    pt->root = &pt->storage.data[0].node;
+    pt->root = (PTNode*)pt->storage.nodes;
     *(pt->root) = node_default();
 
     pt->root->end.line     = pt->line_cnt - 1;
@@ -111,42 +118,39 @@ void piece_tree_init(PieceTree* pt, const char* original_src, size_t size, bool 
     pt->root->is_black     = true;
     pt->root->nl_cnt       = pt->line_cnt - 1;
 
-    pt->storage.data[0].free = false;
+    pt->storage.nodes[0].next = PT_INVALID;
+    pt->storage.nodes[0].free = false;
+
     PT_VALIDATE(pt);
 }
 
 void piece_tree_free(PieceTree* pt)
 {
-    free(pt->storage.data);
     free((void*)pt->original.data);
     free((void*)pt->original.line_starts);
 
     da_free_data(&pt->added);
     da_free_data(&pt->added.line_starts);
-    da_free_data(&pt->free_list);
 }
 
-void piece_tree_insert(PieceTree* pt, const char* str, size_t offset)
+void piece_tree_insert(PieceTree* pt, const char* data, size_t count, size_t offset)
 {
     GEM_ASSERT(pt != NULL);
-    GEM_ASSERT(str != NULL);
+    GEM_ASSERT(data != NULL);
     GEM_ASSERT(offset <= pt->size);
-    if(str[0] == '\0')
+    if(count == 0 || data[0] == '\0')
         return;
 
-    if(pt->free_list.size < 2)
-        expand_node_storage(pt, pt->storage.capacity + (pt->storage.capacity >> 1) + 2);
+    expand_node_storage(pt, 2);
 
     PTNode* node;
-    size_t node_start_offset;
-    size_t len = strlen(str);
-    PTNode new_node = create_node_and_append(pt, str, len);
+    PTNode* new = create_node_and_append(pt, data, count);
+    size_t  node_start_offset;
 
     if(pt->root == SENTINEL)
     {
-        pt->root = alloc_node(pt);
-        new_node.is_black = true;
-        *pt->root = new_node;
+        pt->root = new;
+        pt->root->is_black = true;
         PT_VALIDATE(pt);
         return;
     }
@@ -157,8 +161,6 @@ void piece_tree_insert(PieceTree* pt, const char* str, size_t offset)
     if(offset == 0) 
     {
         node = left_test(pt->root);
-        PTNode* new = alloc_node(pt);
-        *new = new_node;
         new->parent = node;
         node->left = new;
         bubble_meta_changes(pt, new, pt->root, new->length, new->nl_cnt);
@@ -173,9 +175,7 @@ void piece_tree_insert(PieceTree* pt, const char* str, size_t offset)
     if(node_start_offset + node->length > offset) // Split node
     {
         size_t node_new_len = offset - node_start_offset;
-        PTNode* new = alloc_node(pt);
         PTNode* split = split_node(pt, node, node_new_len, node->length - node_new_len);
-        *new = new_node;
 
         if(node->right == SENTINEL) 
         {
@@ -213,18 +213,17 @@ void piece_tree_insert(PieceTree* pt, const char* str, size_t offset)
         }
         fix_insert(pt, new);
     }
-    else if(!node->is_original && node->end.line == new_node.start.line && 
-            node->end.column == new_node.start.column) // Append to node
+    else if(!node->is_original && node->end.line == new->start.line && 
+            node->end.column == new->start.column) // Append to node
     {
-        node->end = new_node.end;
-        node->length += len;
-        node->nl_cnt += new_node.nl_cnt;
-        bubble_meta_changes(pt, node, pt->root, len, new_node.nl_cnt);
+        node->end = new->end;
+        node->length += count;
+        node->nl_cnt += new->nl_cnt;
+        bubble_meta_changes(pt, node, pt->root, count, new->nl_cnt);
+        free_node(pt, new);
     }
     else // Insert to the right of node
     {
-        PTNode* new = alloc_node(pt);
-        *new = new_node;
         if(node->right == SENTINEL) 
         {
             node->right = new;
@@ -253,8 +252,7 @@ void piece_tree_delete(PieceTree* pt, size_t offset, size_t count)
     GEM_ASSERT(offset < pt->size);
     GEM_ASSERT(count <= pt->size - offset);
 
-    if(pt->free_list.size < 2)
-        expand_node_storage(pt, pt->storage.capacity + (pt->storage.capacity >> 1) + 2);
+    expand_node_storage(pt, 2);
 
     size_t start_offset;
     size_t end_offset;
@@ -328,27 +326,39 @@ void piece_tree_delete(PieceTree* pt, size_t offset, size_t count)
         return;
     }
 
-    start->start = position_in_buffer(pt, start, offset - start_offset);
-    size_t prev_nl_cnt = start->nl_cnt;
-    start->nl_cnt = start->end.line - start->start.line;
-    start->length -= count;
-    bubble_meta_changes(pt, start, pt->root, -count, start->nl_cnt - prev_nl_cnt);
-    pt->line_cnt -= prev_nl_cnt - start->nl_cnt;
-
-    end->end = position_in_buffer(pt, end, offset - end_offset);
-    prev_nl_cnt = end->nl_cnt;
-    end->nl_cnt = end->end.line - end->start.line;
-    end->length -= count;
-    bubble_meta_changes(pt, end, pt->root, -count, end->nl_cnt - prev_nl_cnt);
-    pt->line_cnt -= prev_nl_cnt - end->nl_cnt;
-
+    // TODO: Maybe make this dynamic array permanent to avoid
+    //       unnecessary mallocs and reallocs?
     struct {
         PTNode** data;
         size_t capacity;
         size_t size;
     } nodes_to_del;
-
     da_init(&nodes_to_del, 10);
+
+    size_t prev_length;
+    size_t prev_nl_cnt;
+
+    // TODO: Separate these into functions like delete_head and delete_tail
+    prev_length = start->length;
+    prev_nl_cnt = start->nl_cnt;
+    start->end = position_in_buffer(pt, start, offset - start_offset);
+    start->nl_cnt = start->end.line - start->start.line;
+    start->length = offset - start_offset;
+    bubble_meta_changes(pt, start, pt->root, start->length - prev_length, start->nl_cnt - prev_nl_cnt);
+    pt->line_cnt -= prev_nl_cnt - start->nl_cnt;
+    if(start->length == 0)
+        da_append(&nodes_to_del, start);
+
+    prev_length = end->length;
+    prev_nl_cnt = end->nl_cnt;
+    end->start = position_in_buffer(pt, end, offset + count - end_offset);
+    end->nl_cnt = end->end.line - end->start.line;
+    end->length -= offset + count - end_offset;
+    bubble_meta_changes(pt, end, pt->root, end->length - prev_length, end->nl_cnt - prev_nl_cnt);
+    pt->line_cnt -= prev_nl_cnt - end->nl_cnt;
+    if(end->length == 0)
+        da_append(&nodes_to_del, end);
+
     PTNode* cur = next(pt, start);
     while(cur != SENTINEL && cur != end)
     {
@@ -356,12 +366,12 @@ void piece_tree_delete(PieceTree* pt, size_t offset, size_t count)
         cur = next(pt, cur);
     }
 
-    printf("Deleting %lu nodes at a time.\n", nodes_to_del.size);
     for(size_t i = 0; i < nodes_to_del.size; ++i)
     {
         pt->line_cnt -= nodes_to_del.data[i]->nl_cnt;
         delete_node(pt, nodes_to_del.data[i]);
     }
+    da_free_data(&nodes_to_del);
 
     pt->size -= count;
     PT_VALIDATE(pt);
@@ -373,32 +383,34 @@ const PTNode* piece_tree_node_at_line(const PieceTree* pt, size_t line, size_t* 
     GEM_ASSERT(pt != NULL);
     GEM_ASSERT(node_offset != NULL);
     GEM_ASSERT(line < pt->line_cnt);
+    
+    *node_offset = 0;
     if(line == 0)
-    {
-        *node_offset = 0;
         return pt->root == SENTINEL ? NULL : left_test(pt->root);
-    }
 
     PTNode* node = pt->root;
     while(node != SENTINEL)
     {
-        if(line < node->left_nl_cnt)
+        if(node->left != SENTINEL && line <= node->left_nl_cnt)
             node = node->left;
-        else if(line <= node->left_nl_cnt + node->nl_cnt)
+        else if(line < node->left_nl_cnt + node->nl_cnt)
         {
+            const size_t* ls = node->is_original ?
+                                pt->original.line_starts :
+                                pt->added.line_starts.data;
+            line += node->start.line - node->left_nl_cnt;
+            *node_offset = ls[line] - ls[node->start.line] - node->start.column;
+            return node;
+        }
+        else if(line == node->left_nl_cnt + node->nl_cnt)
+        {
+            const size_t* ls = node->is_original ?
+                                pt->original.line_starts :
+                                pt->added.line_starts.data;
             const char* buf = piece_tree_get_node_start(pt, node);
-            if(line == node->left_nl_cnt + node->nl_cnt &&
-               buf[node->length - 1] == '\n')
-            {
-                *node_offset = 0;
+            if(buf[node->length - 1] == '\n')
                 return piece_tree_next_inorder(pt, node);
-            }
-            line -= node->left_nl_cnt;
-            size_t offset;
-            for(offset = 0; line > 0 && offset < node->length; ++offset)
-                if(buf[offset] == '\n')
-                    --line;
-            *node_offset = offset;
+            *node_offset = ls[node->end.line] - ls[node->start.line] - node->start.column;
             return node;
         }
         else
@@ -417,7 +429,7 @@ const PTNode* piece_tree_next_inorder(const PieceTree* pt, const PTNode* node)
     if(node == NULL)
         return pt->root == SENTINEL ? NULL : left_test(pt->root);
     GEM_ASSERT(node != SENTINEL);
-    GEM_ASSERT(in_valid_range(pt, node));
+    GEM_ASSERT(is_valid_node(pt, node));
 
     PTNode* n = next((PieceTree*)pt, (PTNode*)node);
     return n == SENTINEL ? NULL : n;
@@ -427,7 +439,7 @@ const char* piece_tree_get_node_start(const PieceTree* pt, const PTNode* node)
 {
     GEM_ASSERT(pt != NULL);
     GEM_ASSERT(node != SENTINEL);
-    GEM_ASSERT(in_valid_range(pt, node));
+    GEM_ASSERT(is_valid_node(pt, node));
     if(node->is_original)
         return pt->original.data + pt->original.line_starts[node->start.line] + node->start.column;
     return pt->added.data + pt->added.line_starts.data[node->start.line] + node->start.column;
@@ -517,7 +529,8 @@ BufferPos piece_tree_get_buffer_pos(const PieceTree* pt, size_t offset)
 
 static void print_node_contents(const PieceTree* pt, const PTNode* node)
 {
-    if(!in_valid_range(pt, node) || ((PTInternNode*)node)->free)
+    GEM_ASSERT(((NodeIntern*)node)->next != PT_INVALID);
+    if(!is_valid_node(pt, node))
         return;
 
     print_node_contents(pt, node->left);
@@ -546,7 +559,7 @@ void piece_tree_print_contents(const PieceTree* pt)
 
 static void print_node_metadata(const PieceTree* pt, const PTNode* node, size_t depth)
 {
-    if(!in_valid_range(pt, node) || ((PTInternNode*)node)->free)
+    if(!is_valid_node(pt, node))
         return;
 
     print_node_metadata(pt, node->right, depth + 1);
@@ -580,150 +593,15 @@ void piece_tree_print_tree(const PieceTree* pt)
         printf("(Empty Tree)\n");
 }
 
-static PTNode* node_at_offset(PieceTree* pt, size_t offset, size_t* node_start_offset, bool exclusive)
+size_t piece_tree_node_id(const PieceTree* pt, const PTNode* node)
 {
-    GEM_ASSERT(!exclusive || offset > 0);
-    offset -= exclusive;
-    GEM_ASSERT(offset < pt->size);
-    PTNode* node = pt->root;
-    size_t startoff = 0;
-
-    while(node != SENTINEL)
-    {
-        if(node->left_size > offset) // Offset is in left subtree
-            node = node->left;
-        else if(node->left_size + node->length > offset) // Offset is inside this node
-        {
-            *node_start_offset = startoff + node->left_size;
-            return node;
-        }
-        else // Offset is in right subtree
-        {
-            offset -= node->left_size + node->length;
-            startoff += node->left_size + node->length;
-            node = node->right;
-        }
-    }
-
-    GEM_ERROR("This should not have been reached.");
-    return NULL;
-}
-
-static PTNode* alloc_node(PieceTree* pt)
-{
-    GEM_ASSERT(pt->free_list.size > 0);
-    size_t node_idx = pt->free_list.data[pt->free_list.size - 1];
-    GEM_ASSERT(pt->storage.data[node_idx].free);       
-    
-    pt->free_list.size--;
-    PTInternNode* node = pt->storage.data + node_idx;
-    node->free = false;
-    return &node->node;
-}
-
-static void free_node(PieceTree* pt, PTNode* node)
-{
-    if(node == SENTINEL)
-        return;
-    GEM_ASSERT(in_valid_range(pt, node));
-
-    PTInternNode* internal = (PTInternNode*)node;
-    GEM_ASSERT(!internal->free);
-    size_t index = ((uintptr_t)internal - (uintptr_t)pt->storage.data) / sizeof(PTInternNode);
-
-    internal->free = true;
-    da_append(&pt->free_list, index);
-}
-
-static void fix_pointer(PTNode** invalid, uintptr_t delta)
-{
-    if(delta == 0)
-        return;
-    if(*invalid != SENTINEL && *invalid != NULL)
-        *invalid = (PTNode*)((uintptr_t)(*invalid) + delta);
-}
-
-static void expand_node_storage(PieceTree* pt, size_t capacity)
-{
-    if(pt->storage.capacity >= capacity)
-        return;
-
-    size_t prev_cap = pt->storage.capacity;
-    PTInternNode* prev_pointer = pt->storage.data;
-    pt->storage.data = realloc(pt->storage.data, sizeof(PTInternNode) * capacity);
-    GEM_ENSURE(pt->storage.data != NULL);
-    if(prev_pointer != pt->storage.data)
-    {
-        uintptr_t delta = (uintptr_t)pt->storage.data - (uintptr_t)prev_pointer;
-        fix_pointer(&pt->root, delta);
-        for(size_t i = 0; i < prev_cap; ++i)
-        {
-            PTInternNode* intern = pt->storage.data + i;
-            if(!intern->free)
-            {
-                fix_pointer(&intern->node.left, delta);
-                fix_pointer(&intern->node.right, delta);
-                fix_pointer(&intern->node.parent, delta);
-            }
-        }
-    }
-    pt->storage.capacity = capacity;
-    mark_free(pt, prev_cap);
-}
-
-static size_t get_newln_count(const char* str, size_t len)
-{
-    size_t cnt = 0;
-    for(size_t i = 0; i < len; ++i)
-        if(str[i] == '\n')
-            ++cnt;
-    return cnt;
-}
-
-static void bubble_meta_changes(PieceTree* pt, PTNode* node, PTNode* stop,
-                                int64_t size_delta, int64_t newln_delta)
-{
-    GEM_ASSERT(node == SENTINEL || in_valid_range(pt, node));
-    while(node != stop && node->parent != SENTINEL)
-    {
-        if(node == node->parent->left)
-        {
-            node->parent->left_size += size_delta;
-            node->parent->left_nl_cnt += newln_delta;
-        }
-        node = node->parent;
-    }
-}
-
-static PTNode create_node_and_append(PieceTree* pt, const char* str, size_t len)
-{
-    PTNode result = node_default();
-    result.length = len;
-
-    PTPosDA* ls = &pt->added.line_starts;
-    result.start.line = ls->size - 1;
-    result.start.column = pt->added.size - ls->data[ls->size - 1];
-
-    for(size_t i = 0; i < len; ++i)
-        if(str[i] == '\n')
-        {
-            da_append(&pt->added.line_starts, pt->added.size + i + 1);
-            result.nl_cnt++;
-        }
-
-    da_append_arr(&pt->added, str, len);
-    result.end.line = ls->size - 1;
-    result.end.column = pt->added.size - ls->data[ls->size - 1];
-    
-    pt->size += len;
-    pt->line_cnt += result.nl_cnt;
-
-    return result;
+    GEM_ASSERT(pt != NULL);
+    return node_id(pt, node);
 }
 
 static PTNode* split_node(PieceTree* pt, PTNode* node, size_t left_size, size_t right_size)
 {
-    GEM_ASSERT(in_valid_range(pt, node));
+    GEM_ASSERT(is_valid_node(pt, node));
     GEM_ASSERT(left_size != 0 && right_size != 0);
     GEM_ASSERT(left_size + right_size <= node->length);
     PTNode* split = alloc_node(pt);
@@ -741,71 +619,9 @@ static PTNode* split_node(PieceTree* pt, PTNode* node, size_t left_size, size_t 
     return split;
 }
 
-static BufferPos position_in_buffer(const PieceTree* pt, PTNode* node, size_t offset)
-{
-    GEM_ASSERT(in_valid_range(pt, node));
-    GEM_ASSERT(offset <= node->length);
-
-    const size_t* ls = node->is_original ? 
-                        pt->original.line_starts : 
-                        pt->added.line_starts.data;
-
-    size_t buf_off = ls[node->start.line] + node->start.column + offset;
-    size_t lo = node->start.line;
-    size_t hi = node->end.line;
-
-    size_t mid = (lo + hi) / 2;
-
-    while(lo < hi)
-    {
-        if(buf_off < ls[mid])
-            hi = mid - 1;
-        else if(buf_off >= ls[mid + 1])
-            lo = mid + 1;
-        else
-            break;
-
-        mid = (lo + hi) / 2;
-    }
-
-    return (BufferPos) {
-        .line = mid,
-        .column = buf_off - ls[mid]
-    };
-}
-
-static PTNode* next(PieceTree* pt, PTNode* node)
-{
-    if(node->right != SENTINEL)
-        return left_test(node->right);
-    
-    while(node != pt->root)
-    {
-        if(node == node->parent->left)
-            return node->parent;
-        node = node->parent;
-    }
-
-    return SENTINEL;
-}
-
-static PTNode* left_test(const PTNode* node)
-{
-    while(node->left != SENTINEL)
-        node = node->left;
-    return (PTNode*)node;
-}
-
-static PTNode* UNUSED right_test(const PTNode* node)
-{
-    while(node->right != SENTINEL)
-        node = node->right;
-    return (PTNode*)node;
-}
-
 static void fix_insert(PieceTree* pt, PTNode* node)
 {
-    GEM_ASSERT(in_valid_range(pt, node));
+    GEM_ASSERT(is_valid_node(pt, node));
     while(node->parent != SENTINEL && !node->parent->is_black)
     {
         PTNode* aunt;
@@ -895,7 +711,7 @@ static void right_rotate(PieceTree* pt, PTNode* node)
 static void delete_node(PieceTree* pt, PTNode* node)
 {
     GEM_ASSERT(node != SENTINEL);
-    GEM_ASSERT(in_valid_range(pt, node));
+    GEM_ASSERT(is_valid_node(pt, node));
     PTNode* x;
     PTNode* y;
 
@@ -1058,29 +874,254 @@ static void delete_node(PieceTree* pt, PTNode* node)
     SENTINEL->parent = SENTINEL;
 }
 
-static inline void mark_free(PieceTree* pt, size_t start)
+static void bubble_meta_changes(PieceTree* pt, PTNode* node, PTNode* stop,
+                                int64_t size_delta, int64_t newln_delta)
 {
-    size_t prev_size = pt->free_list.size;
-    da_resize(&pt->free_list, prev_size + pt->storage.capacity - start);
-    for(size_t i = prev_size, j = pt->storage.capacity - 1; i < pt->free_list.size; ++i, --j)
+    GEM_ASSERT(node == SENTINEL || is_valid_node(pt, node));
+    while(node != stop && node->parent != SENTINEL)
     {
-        pt->free_list.data[i] = j;
-        pt->storage.data[j].free = true;
+        if(node == node->parent->left)
+        {
+            node->parent->left_size += size_delta;
+            node->parent->left_nl_cnt += newln_delta;
+        }
+        node = node->parent;
     }
 }
 
-static inline bool in_valid_range(const PieceTree* pt, const PTNode* node)
+static PTNode* create_node_and_append(PieceTree* pt, const char* str, size_t len)
 {
-    const PTInternNode* n = (const PTInternNode*)node;
-    return n >= pt->storage.data && n < (pt->storage.data + pt->storage.capacity);
+    PTNode* result = alloc_node(pt);
+    *result = node_default();
+    result->length = len;
+
+    PTPosDA* ls = &pt->added.line_starts;
+    result->start.line = ls->size - 1;
+    result->start.column = pt->added.size - ls->data[ls->size - 1];
+
+    for(size_t i = 0; i < len; ++i)
+        if(str[i] == '\n')
+        {
+            da_append(&pt->added.line_starts, pt->added.size + i + 1);
+            result->nl_cnt++;
+        }
+
+    da_append_arr(&pt->added, str, len);
+    result->end.line = ls->size - 1;
+    result->end.column = pt->added.size - ls->data[ls->size - 1];
+    
+    pt->size += len;
+    pt->line_cnt += result->nl_cnt;
+
+    return result;
+}
+
+static PTNode* node_at_offset(PieceTree* pt, size_t offset, size_t* node_start_offset, bool exclusive)
+{
+    GEM_ASSERT(!exclusive || offset > 0);
+    offset -= exclusive;
+    GEM_ASSERT(offset < pt->size);
+    PTNode* node = pt->root;
+    size_t startoff = 0;
+
+    while(node != SENTINEL)
+    {
+        if(node->left_size > offset) // Offset is in left subtree
+            node = node->left;
+        else if(node->left_size + node->length > offset) // Offset is inside this node
+        {
+            *node_start_offset = startoff + node->left_size;
+            return node;
+        }
+        else // Offset is in right subtree
+        {
+            offset -= node->left_size + node->length;
+            startoff += node->left_size + node->length;
+            node = node->right;
+        }
+    }
+
+    GEM_ERROR("This should not have been reached.");
+    return NULL;
+}
+
+static BufferPos position_in_buffer(const PieceTree* pt, PTNode* node, size_t offset)
+{
+    GEM_ASSERT(is_valid_node(pt, node));
+    GEM_ASSERT(offset <= node->length);
+    if(offset == 0)
+        return node->start;
+    if(offset == node->length)
+        return node->end;
+
+    const size_t* ls = node->is_original ? 
+                        pt->original.line_starts : 
+                        pt->added.line_starts.data;
+
+    size_t buf_off = ls[node->start.line] + node->start.column + offset;
+    size_t lo = node->start.line;
+    size_t hi = node->end.line;
+
+    size_t mid = (lo + hi) / 2;
+
+    while(lo < hi)
+    {
+        if(buf_off < ls[mid])
+            hi = mid - 1;
+        else if(buf_off >= ls[mid + 1])
+            lo = mid + 1;
+        else
+            break;
+
+        mid = (lo + hi) / 2;
+    }
+
+    return (BufferPos) {
+        .line = mid,
+        .column = buf_off - ls[mid]
+    };
+}
+
+static PTNode* next(PieceTree* pt, PTNode* node)
+{
+    if(node->right != SENTINEL)
+        return left_test(node->right);
+    
+    while(node != pt->root)
+    {
+        if(node == node->parent->left)
+            return node->parent;
+        node = node->parent;
+    }
+
+    return SENTINEL;
+}
+
+static PTNode* left_test(const PTNode* node)
+{
+    while(node->left != SENTINEL)
+        node = node->left;
+    return (PTNode*)node;
+}
+
+static PTNode* UNUSED right_test(const PTNode* node)
+{
+    while(node->right != SENTINEL)
+        node = node->right;
+    return (PTNode*)node;
+}
+
+static PTNode* alloc_node(PieceTree* pt)
+{
+    PTStorage* s = &pt->storage;
+    GEM_ASSERT(s->free_count > 0);
+    NodeIntern* intern = s->nodes + s->free_head;
+    GEM_ASSERT(intern->free);
+    
+    s->free_count--;
+    s->free_head = intern->next;
+    intern->next = PT_INVALID;
+    intern->free = false;
+    return &intern->node;
+}
+
+static void free_node(PieceTree* pt, PTNode* node)
+{
+    if(node == SENTINEL)
+        return;
+
+    PTStorage* s = &pt->storage;
+    GEM_ASSERT(is_valid_node(pt, node));
+    NodeIntern* internal = (NodeIntern*)node;
+    GEM_ASSERT(!internal->free);
+    size_t index = node_id(pt, node) - 1;
+
+    internal->free = true;
+    internal->next = s->free_head;
+    s->free_head = index;
+    s->free_count++;
+}
+
+static void fix_pointer(PTNode** invalid, uintptr_t delta)
+{
+    PTNode* val = *invalid;
+    if(delta != 0 && val != SENTINEL && val != NULL)
+        *invalid = (PTNode*)((uintptr_t)val + delta);
+}
+
+static void expand_node_storage(PieceTree* pt, size_t increase)
+{
+    PTStorage* s = &pt->storage;
+    if(increase == 0 || increase <= s->free_count)
+        return;
+
+    NodeIntern* prev_pointer = s->nodes;
+    size_t prev_cap = s->capacity;
+    size_t new_cap = s->capacity + increase;
+    new_cap += new_cap >> 1;
+
+    s->nodes = realloc(s->nodes, sizeof(NodeIntern) * new_cap);
+    GEM_ENSURE(s->nodes != NULL);
+    if(prev_pointer != s->nodes)
+    {
+        uintptr_t delta = (uintptr_t)s->nodes - (uintptr_t)prev_pointer;
+        fix_pointer(&pt->root, delta);
+        for(NodeIntern* intern = s->nodes; intern < s->nodes + prev_cap; intern++)
+        {
+            if(intern->next >= prev_cap)
+            {
+                fix_pointer(&intern->node.left, delta);
+                fix_pointer(&intern->node.right, delta);
+                fix_pointer(&intern->node.parent, delta);
+            }
+        }
+    }
+    s->capacity = new_cap;
+    mark_free(pt, prev_cap);
+}
+
+static inline void mark_free(PieceTree* pt, size_t start)
+{
+    PTStorage* s = &pt->storage;
+    GEM_ASSERT(s->capacity > 0);
+    GEM_ASSERT(start < s->capacity);
+    NodeIntern* last;
+    if(s->free_head == PT_INVALID)
+        s->free_head = start;
+    else
+    {
+        last = s->nodes + s->free_head;
+        while(last->next != PT_INVALID)
+            last = s->nodes + last->next;
+        last->next = start;
+    }
+    last = s->nodes + start;
+    last->next = PT_INVALID;
+    last->free = true;
+    for(size_t i = start + 1; i < s->capacity; ++i)
+    {
+        last->next = i;
+        last->free = true;
+        last++;
+    }
+    s->free_count += s->capacity - start;
+}
+
+static inline bool is_valid_node(const PieceTree* pt, const PTNode* node)
+{
+    const NodeIntern* n = (const NodeIntern*)node;
+    return n >= pt->storage.nodes && 
+           n < (pt->storage.nodes + pt->storage.capacity) &&
+           n->next == PT_INVALID;
 }
 
 static inline size_t node_id(const PieceTree* pt, const PTNode* node)
 {
-    GEM_ASSERT(node == SENTINEL || in_valid_range(pt, node));
-    uintptr_t i = ((uintptr_t)node - (uintptr_t)pt->storage.data) / sizeof(PTInternNode);
+    GEM_ASSERT(node == SENTINEL || is_valid_node(pt, node));
+    uintptr_t i = ((uintptr_t)node - (uintptr_t)pt->storage.nodes) / sizeof(NodeIntern);
     return node == SENTINEL ? 0 : 1 + (size_t)i;
 }
+
 
 static inline PTNode node_default(void)
 {
@@ -1156,8 +1197,8 @@ static PTValidData validate_node(const PieceTree* pt, const PTNode* node)
         return res;
     
     // Check that the node ref itself is valid
-    PT_CHECK(in_valid_range(pt, node), "Node not in valid range.");
-    PT_CHECK(!((PTInternNode*)node)->free, "Node is not marked as allocated.");
+    PT_CHECK(is_valid_node(pt, node), "Node pointer is invalid.");
+    PT_CHECK(((NodeIntern*)node)->next == PT_INVALID, "Node is not marked as allocated.");
     // Check that there are no loops 
     PT_CHECK(!node->used, "Node has already been encountered, there is a loop.");
     // Check red-black tree requirement
@@ -1228,10 +1269,10 @@ static void validate_tree(const PieceTree* pt)
 
     size_t cnt = 0;
     for(size_t i = 0; i < pt->storage.capacity; ++i)
-        if(!pt->storage.data[i].free)
+        if(!pt->storage.nodes[i].free)
         {
             cnt++;
-            pt->storage.data[i].node.used = false;
+            pt->storage.nodes[i].node.used = false;
         }
 
     PTValidData data = validate_node(pt, pt->root);

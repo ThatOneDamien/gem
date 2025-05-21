@@ -12,7 +12,7 @@
 
 typedef struct
 {
-    GemQuad  tex_coords;
+    float    tex_coords[4];
     uint32_t width, height;
     uint32_t xoff, yoff;
 } GemGlyphData;
@@ -30,9 +30,9 @@ void  gem_freetype_init(void);
 bool  gem_gen_font_atlas(const char* font_path, GemFont* font);
 void  gem_freetype_cleanup(void);
 
-size_t gem_get_font_size(void);
-float  gem_get_line_height(void);
-float  gem_get_vert_advance(void);
+int   gem_get_font_size(void);
+float gem_get_line_height(void);
+int   gem_get_vert_advance(void);
 
 void gem_set_font_size(size_t font_size);
 void gem_set_line_height(float line_height);

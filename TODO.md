@@ -1,8 +1,11 @@
 # List of things to do for the editor that I can think of.
 
-- Add a cache for the piece tree
+- Fix bugs in piece tree relating to the node free list.
+- Make buffer camera follow cursor horizontally
 - Add file manager of some sorts to naviagate files on disk
+- Add a cache for the piece tree
 - Expand upon the current renderer to allow for more customizable text rendering
+- Treesitter syntax highlighting?
 - Abstract some sort of floating window object that can hold text similar to neovim
 - Add a basic capability for minor configuration through external files (e.g. setting keybinds)
 - Add better motions and deletion capability

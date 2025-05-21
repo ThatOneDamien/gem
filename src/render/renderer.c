@@ -18,8 +18,8 @@
 
 typedef struct
 {
-    vec2pos   position;
-    vec2pos   tex_coords;
+    float     position[2];
+    float     tex_coords[2];
     vec4color color;
     float     solid;
 } QuadVertex;
@@ -35,7 +35,7 @@ static uint32_t s_QuadCnt; // Quad count of current batch
 static GemRenderStats s_Stats;
 
 static bool create_shader_program(const char* vert_path, const char* frag_path, GLuint* program_id);
-static void draw_quad(const GemQuad* quad, const GemQuad* tex, vec4color color, bool is_solid);
+static void draw_quad(const GemQuad* quad, const float tex[4], vec4color color, bool is_solid);
 static void draw_char(char c, vec2pos pos, vec4color color);
 static void handle_char(char c, const GemQuad* bounding_box, vec2pos* pen);
 
@@ -86,7 +86,7 @@ void gem_renderer_init(void)
     GEM_ENSURE_MSG(result, "Failed to create text shader, exiting.");
     glUseProgram(s_Shader);
 
-    s_VertexData = calloc(MAX_VERTICES, sizeof(QuadVertex));
+    s_VertexData = malloc(MAX_VERTICES * sizeof(QuadVertex));
     s_VertexInsert = s_VertexData;
 
     {
@@ -172,7 +172,7 @@ static void draw_char(char c, vec2pos pos, vec4color color)
                                   pos.x + data->width, 
                                   pos.y);
 
-    draw_quad(&char_quad, &data->tex_coords, color, false);
+    draw_quad(&char_quad, data->tex_coords, color, false);
 }
 
 static void handle_char(char c, const GemQuad* bounding_box, vec2pos* pen)
@@ -212,16 +212,17 @@ void gem_renderer_draw_buffer(const TextBuffer* buffer)
 {
     GEM_ASSERT(buffer != NULL);
 
+    uint32_t num_pad = s_Font.advance / 4;
     const GemQuad* buf_bb = &buffer->bounding_box;
     GemQuad line_sidebar = make_quad(buf_bb->bl.x,
                                      buf_bb->bl.y,
-                                     buf_bb->bl.x + s_Font.advance * 5 + 4.0f,
+                                     buf_bb->bl.x + s_Font.advance * 5 + num_pad * 2,
                                      buf_bb->tr.y);
     
-    GemQuad text_bb = make_quad(line_sidebar.tr.x + 10.0f,
-                                buf_bb->bl.y,
-                                buf_bb->tr.x,
-                                buf_bb->tr.y);
+    GemQuad text_bb = make_quad(line_sidebar.tr.x + buffer->text_padding.left,
+                                buf_bb->bl.y - buffer->text_padding.bottom,
+                                buf_bb->tr.x - buffer->text_padding.right,
+                                buf_bb->tr.y + buffer->text_padding.top);
 
     // Draw sidebar with line numbers
     vec2pos   pen;
@@ -229,11 +230,12 @@ void gem_renderer_draw_buffer(const TextBuffer* buffer)
     vec4color sidebar_color = { 0.1f, 0.1f, 0.1f, 1.0f };
     pen.y = line_sidebar.tr.y;
 
+    float vert_advance = gem_get_vert_advance();
 
     draw_quad(&line_sidebar, NULL, sidebar_color, true);
-    for(size_t line = buffer->camera_start_line; pen.y < line_sidebar.bl.y; ++line)
+    for(size_t line = buffer->view.start.line; pen.y < line_sidebar.bl.y; ++line)
     {
-        pen.x = line_sidebar.tr.x - s_Font.advance - 2.0f;
+        pen.x = line_sidebar.tr.x - s_Font.advance - num_pad;
         if(line >= buffer->contents.line_cnt)
             draw_char('~', pen, text_color);
         else
@@ -246,7 +248,7 @@ void gem_renderer_draw_buffer(const TextBuffer* buffer)
                 cpy /= 10;
             }
         }
-        pen.y += gem_get_vert_advance(); // TODO: Make this a variable somewhere called 'line_height' or something
+        pen.y += vert_advance;
     }
 
     // Draw actual text in buffer.
@@ -256,10 +258,10 @@ void gem_renderer_draw_buffer(const TextBuffer* buffer)
     size_t node_offset;
     const char* buf;
     const PieceTree* pt = &buffer->contents;
-    size_t start_offset = piece_tree_get_offset(pt, buffer->camera_start_line, 0);
+    size_t start_offset = piece_tree_get_offset(pt, buffer->view.start.line, 0);
     size_t cur_offset = start_offset;
     vec2pos cursor_pen = pen;
-    const PTNode* node = piece_tree_node_at_line(pt, buffer->camera_start_line, &node_offset);
+    const PTNode* node = piece_tree_node_at_line(pt, buffer->view.start.line, &node_offset);
 
     if(node == NULL)
         goto drawcursor;
@@ -291,6 +293,16 @@ drawcursor:
     if(buffer->cursor.offset >= start_offset && 
        buffer->cursor.offset <= cur_offset)
         draw_cursor(&buffer->cursor, cursor_pen);
+}
+
+const GemFont* gem_get_font(void)
+{
+    return &s_Font;
+}
+
+const GemRenderStats* gem_renderer_get_stats(void)
+{
+    return &s_Stats;
 }
 
 static bool create_shader_program(const char* vert_path, const char* frag_path, GLuint* program_id)
@@ -353,73 +365,53 @@ static bool create_shader_program(const char* vert_path, const char* frag_path, 
     return true;
 }
 
-static void draw_quad(const GemQuad* quad, const GemQuad* tex, vec4color color, bool is_solid)
+static void draw_quad(const GemQuad* quad, const float tex[4], vec4color color, bool is_solid)
 {
+    GEM_ASSERT(quad != NULL);
     GEM_ASSERT(is_solid || tex != NULL);
     if(s_QuadCnt == MAX_QUADS)
         gem_renderer_render_batch();
 
-    s_VertexInsert[0].position.x = quad->bl.x;
-    s_VertexInsert[0].position.y = quad->bl.y;
-    if(!is_solid)
-    {
-        s_VertexInsert[0].tex_coords.x = tex->bl.x;
-        s_VertexInsert[0].tex_coords.y = tex->bl.y;
-    }
-    s_VertexInsert[0].color.r = color.r;
-    s_VertexInsert[0].color.g = color.g;
-    s_VertexInsert[0].color.b = color.b;
-    s_VertexInsert[0].color.a = color.a;
-    s_VertexInsert[0].solid = (float)is_solid;
+    float positions[8] = { 
+        quad->bl.x, quad->bl.y,
+        quad->tr.x, quad->bl.y,
+        quad->tr.x, quad->tr.y,
+        quad->bl.x, quad->tr.y
+    };
 
-    s_VertexInsert[1].position.x = quad->tr.x;
-    s_VertexInsert[1].position.y = quad->bl.y;
+    float texc[8];
     if(!is_solid)
     {
-        s_VertexInsert[1].tex_coords.x = tex->tr.x;
-        s_VertexInsert[1].tex_coords.y = tex->bl.y;
+        texc[0] = tex[0];
+        texc[1] = tex[1];
+        texc[2] = tex[2];
+        texc[3] = tex[1];
+        texc[4] = tex[2];
+        texc[5] = tex[3];
+        texc[6] = tex[0];
+        texc[7] = tex[3];
     }
-    s_VertexInsert[1].color.r = color.r;
-    s_VertexInsert[1].color.g = color.g;
-    s_VertexInsert[1].color.b = color.b;
-    s_VertexInsert[1].color.a = color.a;
-    s_VertexInsert[1].solid = (float)is_solid;
 
-    s_VertexInsert[2].position.x = quad->tr.x;
-    s_VertexInsert[2].position.y = quad->tr.y;
-    if(!is_solid)
+    for(size_t i = 0; i < 4; ++i)
     {
-        s_VertexInsert[2].tex_coords.x = tex->tr.x;
-        s_VertexInsert[2].tex_coords.y = tex->tr.y;
+        s_VertexInsert[i].position[0] = positions[2 * i];
+        s_VertexInsert[i].position[1] = positions[2 * i + 1];
+        if(!is_solid)
+        {
+            s_VertexInsert[i].tex_coords[0] = texc[2 * i];
+            s_VertexInsert[i].tex_coords[1] = texc[2 * i + 1];
+        }
+        s_VertexInsert[i].color.r = color.r;
+        s_VertexInsert[i].color.g = color.g;
+        s_VertexInsert[i].color.b = color.b;
+        s_VertexInsert[i].color.a = color.a;
+        s_VertexInsert[i].solid = (float)is_solid;
     }
-    s_VertexInsert[2].color.r = color.r;
-    s_VertexInsert[2].color.g = color.g;
-    s_VertexInsert[2].color.b = color.b;
-    s_VertexInsert[2].color.a = color.a;
-    s_VertexInsert[2].solid = (float)is_solid;
-
-    s_VertexInsert[3].position.x = quad->bl.x;
-    s_VertexInsert[3].position.y = quad->tr.y;
-    if(!is_solid)
-    {
-        s_VertexInsert[3].tex_coords.x = tex->bl.x;
-        s_VertexInsert[3].tex_coords.y = tex->tr.y;
-    }
-    s_VertexInsert[3].color.r = color.r;
-    s_VertexInsert[3].color.g = color.g;
-    s_VertexInsert[3].color.b = color.b;
-    s_VertexInsert[3].color.a = color.a;
-    s_VertexInsert[3].solid = (float)is_solid;
 
     s_VertexInsert += 4;
     s_QuadCnt++;
-
 }
 
-const GemRenderStats* gem_renderer_get_stats(void)
-{
-    return &s_Stats;
-}
 
 #ifdef GEM_DEBUG
 static APIENTRY void debugCallbackFunc(UNUSED GLenum source, UNUSED GLenum type, UNUSED GLuint id,
