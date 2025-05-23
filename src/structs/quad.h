@@ -1,32 +1,36 @@
 #pragma once
 
-typedef struct
+typedef struct vec2pos vec2pos;
+struct vec2pos
 {
     int x;
     int y;
-} vec2pos;
+};
 
-typedef struct
+typedef struct vec4color vec4color;
+struct vec4color
 {
     float r;
     float g;
     float b;
     float a;
-} vec4color;
+};
 
-typedef struct
+typedef struct GemQuad GemQuad;
+struct GemQuad
 {
     vec2pos bl;
     vec2pos tr;
-} GemQuad;
+};
 
-typedef struct
+typedef struct GemPadding GemPadding;
+struct GemPadding
 {
     int bottom;
     int top;
     int left;
     int right;
-} GemPadding;
+};
 
 static inline GemQuad make_quad(int x1, int y1, int x2, int y2)
 {

@@ -1,8 +1,8 @@
 #pragma once
-#include "structs/textbuffer.h"
+#include "editor/buffer.h"
 
 #include <stdbool.h>
 #include <stddef.h>
 
-bool gem_read_entire_file(const char* path, char** src, size_t* size);
-bool gem_write_text_buffer(const TextBuffer* buf, const char* path);
+bool read_entire_file(const char* path, char** src, size_t* size);
+bool write_buffer(BufNr bufnr, const char* path);

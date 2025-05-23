@@ -4,8 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-void gem_window_create(uint32_t width, uint32_t height);
-void gem_window_destroy(void);
-void gem_window_dispatch_events(void);
-void gem_window_swap(void);
-void gem_window_get_dims(int* width, int* height);
+void window_create(uint32_t width, uint32_t height);
+void window_destroy(void);
+void window_dispatch_events(void);
+void window_swap(void);
+void window_get_dims(int* width, int* height);

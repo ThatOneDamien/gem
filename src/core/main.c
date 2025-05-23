@@ -2,8 +2,8 @@
 
 #include <stdio.h>
 
-void gem_app_init(const char* file_to_open);
-void gem_app_run(void);
+void gem_init(const char* file_to_open);
+void gem_run(void);
 
 int main(int argc, char* argv[])
 {
@@ -13,7 +13,7 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    gem_app_init(argc > 1 ? argv[1] : NULL);
-    gem_app_run();
+    gem_init(argc > 1 ? argv[1] : NULL);
+    gem_run();
     return 0;
 }

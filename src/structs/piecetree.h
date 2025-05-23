@@ -87,8 +87,10 @@ void piece_tree_free(PieceTree* pt);
 void piece_tree_insert(PieceTree* pt, const char* data, size_t count, size_t offset);
 void piece_tree_delete(PieceTree* pt, size_t offset, size_t count);
 
+const PTNode* piece_tree_node_at(const PieceTree* pt, size_t offset, size_t* node_start_offset);
 const PTNode* piece_tree_node_at_line(const PieceTree* pt, size_t line, size_t* node_offset);
 const PTNode* piece_tree_next_inorder(const PieceTree* pt, const PTNode* node);
+const PTNode* piece_tree_prev_inorder(const PieceTree* pt, const PTNode* node);
 const char*   piece_tree_get_node_start(const PieceTree* pt, const PTNode* node);
 size_t        piece_tree_get_line_length(const PieceTree* pt, size_t line_num);
 size_t        piece_tree_get_offset(const PieceTree* pt, size_t line, size_t column);

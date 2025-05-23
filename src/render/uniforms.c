@@ -11,7 +11,7 @@ static struct
     float projection[4][4];
 } s_Uniforms;
 
-void gem_uniforms_init(void)
+void uniforms_init(void)
 {
     glCreateBuffers(1, &s_UBO);
     glNamedBufferData(s_UBO, sizeof(s_Uniforms), NULL, GL_DYNAMIC_DRAW);
@@ -26,7 +26,7 @@ void gem_uniforms_init(void)
 
 
 
-void gem_set_projection(int width, int height)
+void set_projection(int width, int height)
 {
     GEM_ASSERT(width > 0 && height > 0);
     s_Uniforms.projection[0][0] =  2.0f / (float)width;
@@ -35,4 +35,4 @@ void gem_set_projection(int width, int height)
     glViewport(0, 0, (GLsizei)width, (GLsizei)height);
 }
 
-void gem_uniforms_cleanup(void) { glDeleteBuffers(1, &s_UBO); }
+void uniforms_cleanup(void) { glDeleteBuffers(1, &s_UBO); }

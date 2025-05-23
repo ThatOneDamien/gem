@@ -16,7 +16,7 @@
 #define ATLAS_OFFSET  10
 
 #define DEFAULT_FONT_SIZE   20
-#define DEFAULT_LINE_HEIGHT 1.2f
+#define DEFAULT_LINE_HEIGHT 1.3f
 #define DEFAULT_VERT_ADV    (int)((float)DEFAULT_FONT_SIZE * DEFAULT_LINE_HEIGHT)
 
 #define CHECK_FT_OR_RET(to_check, ret_val) \
@@ -37,7 +37,7 @@ static int s_FontSize = DEFAULT_FONT_SIZE; // For now only one font size is allo
 static float s_LineHeight = DEFAULT_LINE_HEIGHT;
 static int s_VertAdvance = DEFAULT_VERT_ADV;
 
-void gem_freetype_init(void)
+void freetype_init(void)
 {
     FT_Error err = FT_Init_FreeType(&s_Library);
     GEM_ENSURE_ARGS(err == FT_Err_Ok, "Freetype initialization failed (error code: %d).", err);
@@ -93,7 +93,7 @@ GemGlyphData put_glyph_in_atlas(uint8_t* atlas, size_t tex_width, size_t tex_hei
     return glyph_data;
 }
 
-bool gem_gen_font_atlas(const char* font_path, GemFont* font)
+bool gen_font_atlas(const char* font_path, GemFont* font)
 {
     GEM_ASSERT(font_path != NULL);
     GEM_ASSERT(font != NULL);
@@ -158,28 +158,28 @@ clean:
     return result;
 }
 
-void gem_freetype_cleanup(void)
+void freetype_cleanup(void)
 {
     FT_Error err = FT_Done_FreeType(s_Library);
     GEM_ENSURE_ARGS(err == FT_Err_Ok, "Freetype closed unsuccessfully (error code: %d).", err);
 }
 
-int gem_get_font_size(void)
+int get_font_size(void)
 {
     return s_FontSize;
 }
 
-float gem_get_line_height(void)
+float get_line_height(void)
 {
     return s_LineHeight;
 }
 
-int gem_get_vert_advance(void)
+int get_vert_advance(void)
 {
     return s_VertAdvance;
 }
 
-void gem_set_font_size(size_t font_size)
+void set_font_size(size_t font_size)
 {
     s_FontSize = font_size;
     // This should also recreate the atlases with the new
@@ -188,7 +188,7 @@ void gem_set_font_size(size_t font_size)
     s_VertAdvance = (int)((float)s_FontSize * s_LineHeight);
 }
 
-void gem_set_line_height(float line_height)
+void set_line_height(float line_height)
 {
     s_LineHeight = line_height;
     s_VertAdvance = (int)((float)s_FontSize * s_LineHeight);

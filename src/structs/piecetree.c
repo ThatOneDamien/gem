@@ -4,7 +4,10 @@
 
 #include <string.h>
 
-#define PT_INVALID UINT64_MAX
+#define PT_INVALID        UINT64_MAX
+#define INITIAL_STORAGE   (1 << 7)
+#define INITIAL_ADDED_CAP (1 << 12)
+#define INITIAL_LINE_CAP  (1 << 6)
 
 #ifdef GEM_PT_VALIDATE
 static void validate_tree(const PieceTree* pt);
@@ -58,14 +61,15 @@ void piece_tree_init(PieceTree* pt, const char* original_src, size_t size, bool 
     GEM_ASSERT(pt != NULL);
     memset(pt, 0, sizeof(PieceTree));
 
-    pt->storage.capacity = 10;
+    pt->storage.capacity = INITIAL_STORAGE;
     pt->storage.nodes = malloc(sizeof(NodeIntern) * pt->storage.capacity);
+    GEM_ENSURE(pt->storage.nodes != NULL);
     pt->storage.free_head = PT_INVALID;
 
     // TODO: Replace the 0 initial capacities with something more reasonable
     // to start with.
-    da_init(&pt->added, 0);
-    da_init(&pt->added.line_starts, 0);
+    da_init(&pt->added, INITIAL_ADDED_CAP);
+    da_init(&pt->added.line_starts, INITIAL_LINE_CAP);
     da_append(&pt->added.line_starts, 0);
     pt->size = size;
     pt->original.size = size;
@@ -74,7 +78,6 @@ void piece_tree_init(PieceTree* pt, const char* original_src, size_t size, bool 
     if(pt->size == 0)
     {
         pt->root = SENTINEL;
-        pt->storage.free_count = 10;
         mark_free(pt, 0);
         return;
     }
@@ -88,7 +91,6 @@ void piece_tree_init(PieceTree* pt, const char* original_src, size_t size, bool 
     else
         pt->original.data = original_src;
 
-    pt->storage.free_count = 9;
     mark_free(pt, 1);
 
     for(size_t i = 0; i < size; ++i)
@@ -126,6 +128,7 @@ void piece_tree_init(PieceTree* pt, const char* original_src, size_t size, bool 
 
 void piece_tree_free(PieceTree* pt)
 {
+    free(pt->storage.nodes);
     free((void*)pt->original.data);
     free((void*)pt->original.line_starts);
 
@@ -378,6 +381,12 @@ void piece_tree_delete(PieceTree* pt, size_t offset, size_t count)
     
 }
 
+const PTNode* piece_tree_node_at(const PieceTree* pt, size_t offset, size_t* node_start_offset)
+{
+    GEM_ASSERT(pt != NULL);
+    return node_at_offset((PieceTree*)pt, offset, node_start_offset, false);
+}
+
 const PTNode* piece_tree_node_at_line(const PieceTree* pt, size_t line, size_t* node_offset)
 {
     GEM_ASSERT(pt != NULL);
@@ -433,6 +442,27 @@ const PTNode* piece_tree_next_inorder(const PieceTree* pt, const PTNode* node)
 
     PTNode* n = next((PieceTree*)pt, (PTNode*)node);
     return n == SENTINEL ? NULL : n;
+}
+
+const PTNode* piece_tree_prev_inorder(const PieceTree* pt, const PTNode* node)
+{
+    GEM_ASSERT(pt != NULL);
+    if(node == NULL)
+        return pt->root == SENTINEL ? NULL : right_test(pt->root);
+    GEM_ASSERT(node != SENTINEL);
+    GEM_ASSERT(is_valid_node(pt, node));
+
+    if(node->left != SENTINEL)
+        return right_test(node->left);
+    
+    while(node != pt->root)
+    {
+        if(node == node->parent->right)
+            return node->parent;
+        node = node->parent;
+    }
+
+    return NULL;
 }
 
 const char* piece_tree_get_node_start(const PieceTree* pt, const PTNode* node)
@@ -565,7 +595,11 @@ static void print_node_metadata(const PieceTree* pt, const PTNode* node, size_t 
     print_node_metadata(pt, node->right, depth + 1);
     for(size_t i = 0; i < depth; ++i)
         printf("  ");
-    printf("(%c %s Start:%lu,%lu End:%lu,%lu Len:%lu NLCnt:%lu LeftSz:%lu LeftNL:%lu Id:%lu Parent:%lu Left:%lu Right:%lu)\n", 
+    printf("(Id:%lu Parent:%lu Left:%lu Right:%lu %c %s Start:%lu,%lu End:%lu,%lu Len:%lu NLCnt:%lu LeftSz:%lu LeftNL:%lu)\n", 
+           node_id(pt, node),
+           node_id(pt, node->parent),
+           node_id(pt, node->left),
+           node_id(pt, node->right),
            node->is_black ? 'B' : 'R',
            node->is_original ? "Or" : "Ad",
            node->start.line,
@@ -575,11 +609,7 @@ static void print_node_metadata(const PieceTree* pt, const PTNode* node, size_t 
            node->length,
            node->nl_cnt,
            node->left_size,
-           node->left_nl_cnt,
-           node_id(pt, node),
-           node_id(pt, node->parent),
-           node_id(pt, node->left),
-           node_id(pt, node->right));
+           node->left_nl_cnt);
     print_node_metadata(pt, node->left, depth + 1);
 }
 
@@ -916,10 +946,10 @@ static PTNode* create_node_and_append(PieceTree* pt, const char* str, size_t len
     return result;
 }
 
-static PTNode* node_at_offset(PieceTree* pt, size_t offset, size_t* node_start_offset, bool exclusive)
+static PTNode* node_at_offset(PieceTree* pt, size_t offset, size_t* node_start_offset, bool tail)
 {
-    GEM_ASSERT(!exclusive || offset > 0);
-    offset -= exclusive;
+    GEM_ASSERT(!tail || offset > 0);
+    offset -= tail;
     GEM_ASSERT(offset < pt->size);
     PTNode* node = pt->root;
     size_t startoff = 0;
@@ -1096,14 +1126,14 @@ static inline void mark_free(PieceTree* pt, size_t start)
         last->next = start;
     }
     last = s->nodes + start;
-    last->next = PT_INVALID;
-    last->free = true;
     for(size_t i = start + 1; i < s->capacity; ++i)
     {
         last->next = i;
         last->free = true;
         last++;
     }
+    last->next = PT_INVALID;
+    last->free = true;
     s->free_count += s->capacity - start;
 }
 
@@ -1155,23 +1185,24 @@ static inline void pt_check_impl(const PieceTree* pt, const PTNode* node,
 {
     static const char* op_str[] = {
         "",
-        "",
         "< ",
         "<= ",
         "> ",
         ">= "
     };
     piece_tree_print_tree(pt);
-    if(op == 0)
+    if(node == NULL)
     {
-        GEM_ERROR_ARGS("TREE INVALID (Node ID %lu): %s",
-                       node == NULL ? 0 : node_id(pt, node),
+        GEM_ERROR_ARGS("TREE INVALID (Actual: %ld Expected: %s%ld): %s",
+                       actual, 
+                       op_str[op],
+                       expected,
                        msg);
     }
     else
     {
-        GEM_ERROR_ARGS("TREE INVALID (Node ID %lu) (Actual: %ld Expected: %s%ld): %s",
-                       node == NULL ? 0 : node_id(pt, node), 
+        GEM_ERROR_ARGS("TREE NODE INVALID (ID %lu) (Actual: %ld Expected: %s%ld): %s",
+                       node_id(pt, node), 
                        actual, 
                        op_str[op],
                        expected,
@@ -1179,12 +1210,30 @@ static inline void pt_check_impl(const PieceTree* pt, const PTNode* node,
     }
 }
 
-#define PT_CHECK(cond, msg) { if(!(cond)) pt_check_impl(pt, node, msg, 0, 0, 0); }
-#define PT_CHECK_EQ(actual, expected, msg) { if((actual) != (expected)) pt_check_impl(pt, node, msg, 1, actual, expected); }
-#define PT_CHECK_LT(actual, expected, msg) { if((actual) >= (expected)) pt_check_impl(pt, node, msg, 2, actual, expected); }
-#define PT_CHECK_LE(actual, expected, msg) { if((actual) > (expected)) pt_check_impl(pt, node, msg, 3, actual, expected); }
-#define PT_CHECK_GT(actual, expected, msg) { if((actual) <= (expected)) pt_check_impl(pt, node, msg, 4, actual, expected); }
-#define PT_CHECK_GE(actual, expected, msg) { if((actual) < (expected)) pt_check_impl(pt, node, msg, 5, actual, expected); }
+static inline void pt_check_simple(const PieceTree* pt, const PTNode* node,
+                                   const char* msg)
+{
+    piece_tree_print_tree(pt);
+    if(node == NULL)
+    {
+        GEM_ERROR_ARGS("TREE INVALID: %s",
+                       msg);
+    }
+    else
+    {
+        GEM_ERROR_ARGS("TREE NODE INVALID (ID %lu): %s",
+                       node_id(pt, node), 
+                       msg);
+    }
+
+}
+
+#define PT_CHECK(cond, msg) { if(!(cond)) pt_check_simple(pt, node, msg); }
+#define PT_CHECK_EQ(actual, expected, msg) { if((actual) != (expected)) pt_check_impl(pt, node, msg, 0, actual, expected); }
+#define PT_CHECK_LT(actual, expected, msg) { if((actual) >= (expected)) pt_check_impl(pt, node, msg, 1, actual, expected); }
+#define PT_CHECK_LE(actual, expected, msg) { if((actual) > (expected)) pt_check_impl(pt, node, msg, 2, actual, expected); }
+#define PT_CHECK_GT(actual, expected, msg) { if((actual) <= (expected)) pt_check_impl(pt, node, msg, 3, actual, expected); }
+#define PT_CHECK_GE(actual, expected, msg) { if((actual) < (expected)) pt_check_impl(pt, node, msg, 4, actual, expected); }
 
 static PTValidData validate_node(const PieceTree* pt, const PTNode* node)
 {
@@ -1258,7 +1307,7 @@ static void validate_tree(const PieceTree* pt)
     GEM_ASSERT(pt != NULL);
     // To check:
     // Sentinel validity
-    PTNode* node = SENTINEL;
+    PTNode* node = NULL;
     PT_CHECK(SENTINEL->left == SENTINEL && 
                 SENTINEL->right == SENTINEL &&
                 SENTINEL->parent == SENTINEL &&
@@ -1279,5 +1328,6 @@ static void validate_tree(const PieceTree* pt)
     PT_CHECK_EQ(pt->size, data.size, "Tree size is invalid.");
     PT_CHECK_EQ(pt->line_cnt, data.nl_cnt + 1, "Tree line count is invalid.");
     PT_CHECK_EQ(cnt, data.node_cnt, "Memory leak in node buffer. Ensure nodes are free when detached.");
+    PT_CHECK_EQ(pt->storage.capacity - cnt, pt->storage.free_count, "Free count is incorrect.");
 }
 #endif

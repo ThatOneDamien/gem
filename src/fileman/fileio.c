@@ -7,7 +7,7 @@
 
 #define MAX_FILE_SIZE (1ull << 25) // This is 32MiB, temporary
 
-bool gem_read_entire_file(const char* path, char** src, size_t* size)
+bool read_entire_file(const char* path, char** src, size_t* size)
 {
     GEM_ASSERT(path != NULL);
     GEM_ASSERT(src != NULL);
@@ -59,9 +59,8 @@ end:
     return success;
 }
 
-bool gem_write_text_buffer(const TextBuffer* buf, const char* path)
+bool write_buffer(BufNr bufnr, const char* path)
 {
-    GEM_ASSERT(buf != NULL);
     GEM_ASSERT(path != NULL);
 
     bool success = false;
@@ -71,7 +70,7 @@ bool gem_write_text_buffer(const TextBuffer* buf, const char* path)
     if(fd == -1)
         return false;
 
-    const PieceTree* pt = &buf->contents;
+    const PieceTree* pt = buffer_get_pt(bufnr);
     const PTNode* node = piece_tree_next_inorder(pt, NULL);
     size_t total_written = 0;
     while(node != NULL)

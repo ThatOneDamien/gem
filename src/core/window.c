@@ -19,6 +19,8 @@ static GLXFBConfig get_best_config(void);
 static void set_keymap(void);
 static int translate_keysym(const KeySym* keysyms, int width);
 
+extern void bufwin_update_screen(int width, int height);
+
 /*
  * Static variables relating to the window.
  */
@@ -30,11 +32,12 @@ static uint16_t s_KeyMap[256];
 static struct
 {
     Window handle;
-    int width, height;
+    int width;
+    int height;
     bool focused;
 } s_Window;
 
-void gem_window_create(uint32_t width, uint32_t height)
+void window_create(uint32_t width, uint32_t height)
 {
     s_Display = XOpenDisplay(NULL);
     GEM_ENSURE(s_Display != NULL);
@@ -119,20 +122,20 @@ void gem_window_create(uint32_t width, uint32_t height)
     set_keymap();
 }
 
-void gem_window_destroy(void)
+void window_destroy(void)
 {
     glXDestroyContext(s_Display, s_GLContext);
     XDestroyWindow(s_Display, s_Window.handle);
     XCloseDisplay(s_Display);
 }
 
-void gem_window_dispatch_events(void)
+void window_dispatch_events(void)
 {
     int prev_width = s_Window.width;
     int prev_height = s_Window.height;
     XEvent ev;
 
-    while(!s_Window.focused || !gem_app_needs_redraw() || XPending(s_Display))
+    while(!s_Window.focused || !gem_needs_redraw() || XPending(s_Display))
     {
         XNextEvent(s_Display, &ev);
         unsigned int scancode = ev.xkey.keycode;
@@ -142,7 +145,7 @@ void gem_window_dispatch_events(void)
         switch(ev.type)
         {
         case FocusIn: {
-            gem_app_request_redraw();
+            gem_request_redraw();
             s_Window.focused = true;
             break;
         }
@@ -151,11 +154,11 @@ void gem_window_dispatch_events(void)
             break;
         }
         case DestroyNotify: {
-            gem_app_close();
+            gem_close();
             return;
         }
         case Expose: {
-            gem_app_request_redraw();
+            gem_request_redraw();
             s_Window.width = ev.xexpose.width;
             s_Window.height = ev.xexpose.height;
             break;
@@ -165,7 +168,7 @@ void gem_window_dispatch_events(void)
                 return;
             if((Atom)ev.xclient.data.l[0] == s_DeleteWindowAtom)
             {
-                gem_app_close();
+                gem_close();
                 return;
             }
             break;
@@ -173,11 +176,11 @@ void gem_window_dispatch_events(void)
         case KeyPress: {
             uint16_t keycode = s_KeyMap[scancode];
             if(keycode != GEM_KEY_NONE)
-                gem_app_key_press(keycode, ev.xkey.state);
+                gem_key_press(keycode, ev.xkey.state);
             break;
         }
         case ButtonPress: {
-            gem_app_mouse_press(ev.xbutton.button, ev.xbutton.state, ev.xbutton.x, ev.xbutton.y);
+            gem_mouse_press(ev.xbutton.button, ev.xbutton.state, ev.xbutton.x, ev.xbutton.y);
             break;
         }
         case ButtonRelease: {
@@ -187,15 +190,18 @@ void gem_window_dispatch_events(void)
     }
 
     if(prev_width != s_Window.width || prev_height != s_Window.height)
-        gem_set_projection(s_Window.width, s_Window.height);
+    {
+        set_projection(s_Window.width, s_Window.height);
+        bufwin_update_screen(s_Window.width, s_Window.height);
+    }
 }
 
-void gem_window_swap(void)
+void window_swap(void)
 {
     glXSwapBuffers(s_Display, s_Window.handle);
 }
 
-void gem_window_get_dims(int* width, int* height)
+void window_get_dims(int* width, int* height)
 {
     GEM_ASSERT(width != NULL);
     GEM_ASSERT(height != NULL);

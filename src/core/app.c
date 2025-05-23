@@ -7,19 +7,18 @@
 #include "render/font.h"
 #include "render/renderer.h"
 #include "render/uniforms.h"
-#include "structs/textbuffer.h"
+#include "editor/bufferwin.h"
 
 #include <glad/glad.h>
 
 #define GEM_INITIAL_WIDTH  1080
 #define GEM_INITIAL_HEIGHT 720
 
-static bool s_Running;
 static bool s_Redraw;
 static bool s_PrintStats;
-static TextBuffer s_Buffer;
+static BufferWin s_Buffer;
 
-void gem_app_init(const char* file_to_open)
+void gem_init(UNUSED const char* file_to_open)
 {
     // Print welcome message (TEMPORARY)
     printf("\n");
@@ -29,167 +28,76 @@ void gem_app_init(const char* file_to_open)
 
     // Create window, and initialize OpenGL context, renderer,
     // and freetype.
-    gem_window_create(GEM_INITIAL_WIDTH, GEM_INITIAL_HEIGHT);
-    gem_freetype_init();
-    gem_renderer_init();
+    window_create(GEM_INITIAL_WIDTH, GEM_INITIAL_HEIGHT);
+    freetype_init();
+    renderer_init();
+    bufwin_init();
 
     int width, height;
-    gem_window_get_dims(&width, &height);
-    gem_set_projection(width, height);
+    window_get_dims(&width, &height);
+    set_projection(width, height);
+    bufwin_update_screen(width, height);
 
-    if(file_to_open == NULL)
-        text_buffer_open_empty(&s_Buffer);
-    else
-        text_buffer_open_file(&s_Buffer, file_to_open);
-
+    bufwin_open(file_to_open);
     s_Buffer.visible = true;
     s_Buffer.text_padding = (GemPadding){ 0.0f, 0.0f, 10.0f, 0.0f };
-    s_Running = false;
     s_Redraw = false;
 }
 
-void gem_app_run(void)
+void gem_run(void)
 {
-    s_Running = true;
     s_Redraw = true;
     s_PrintStats = false;
     glClearColor(0.02f, 0.03f, 0.05f, 1.0f);
-    while(s_Running)
+    while(true)
     {
         if(s_Redraw)
         {
-            int iw, ih;
-            gem_window_get_dims(&iw, &ih);
             glClear(GL_COLOR_BUFFER_BIT);
-            float w = (float)iw;
-            float h = (float)ih;
-            if(s_Buffer.bounding_box.tr.x != w ||
-               s_Buffer.bounding_box.bl.y != h)
-            {
-                s_Buffer.bounding_box.tr.x = w;
-                s_Buffer.bounding_box.bl.y = h;
-                text_buffer_update_view(&s_Buffer);
-            }
-            gem_renderer_start_batch();
-            gem_renderer_draw_buffer(&s_Buffer);
-            gem_renderer_render_batch();
+            renderer_start_batch();
+            bufwin_render_all();
+            renderer_render_batch();
             if(s_PrintStats)
             {
-                const GemRenderStats* stats = gem_renderer_get_stats();
+                const GemRenderStats* stats = renderer_get_stats();
                 printf("Draw Calls: %2u\tQuad Count: %u\n", stats->draw_calls, stats->quad_count);
             }
-            gem_window_swap();
+            window_swap();
             s_Redraw = false;
         }
-        gem_window_dispatch_events();
+        window_dispatch_events();
     }
-
-    text_buffer_close(&s_Buffer);
-    gem_renderer_cleanup();
-    gem_freetype_cleanup();
-    gem_window_destroy();
 }
 
-void gem_app_close(void) { s_Running = false; }
+void gem_close(void)
+{ 
+    renderer_cleanup();
+    freetype_cleanup();
+    window_destroy();
+    exit(EXIT_SUCCESS);
+}
 
-void gem_app_key_press(uint16_t keycode, uint32_t mods)
+void gem_key_press(uint16_t keycode, uint32_t mods)
 {
-    static const char SHIFT_CONVERSION[GEM_KEY_Z - GEM_KEY_SPACE + 1] = 
-        " \0\0\0\0\0\0\"\0\0\0\0<_>?)!@#$%^&*(\0:\0+"
-        "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
-        "\0\0\0\0\0\0\0\0{|}\0\0~ABCDEFGHIJKLMNOPQR"
-        "STUVWXYZ";
-    if(mods & GEM_MOD_CONTROL)
+    if(mods & GEM_MOD_CONTROL && keycode == GEM_KEY_P)
     {
-        if(keycode == GEM_KEY_P)
-        {
-            s_PrintStats = !s_PrintStats;
-            printf("Printing stats: %s\n", s_PrintStats ? "on" : "off");
-        }
-        else if(keycode == GEM_KEY_T)
-        {
-            piece_tree_print_tree(&s_Buffer.contents);
-        }
-        else if(keycode == GEM_KEY_S)
-        {
-            if(gem_write_text_buffer(&s_Buffer, "temp.txt"))
-                printf("Wrote %lu bytes to temp.txt\n", s_Buffer.contents.size);
-            else
-                printf("Failed to write to temp.txt\n");
-        }
-        else if(keycode == GEM_KEY_D && mods & GEM_MOD_SHIFT && s_Buffer.contents.size > 0)
-        {
-            Cursor* c = &s_Buffer.cursor;
-            size_t start = c->offset - c->pos.column;
-            size_t count = piece_tree_get_line_length(&s_Buffer.contents, c->pos.line) + 1;
-            bool go_down = false;
-            if(c->pos.line == (int64_t)s_Buffer.contents.line_cnt - 1)
-            {
-                if(c->pos.line == 0)
-                    count--;
-                else
-                {
-                    start--;
-                    go_down = true;
-                }
-            }
-            piece_tree_delete(&s_Buffer.contents, start, count);
-            if(go_down)
-                text_buffer_move_cursor_line(&s_Buffer, -1);
-            else
-                text_buffer_cursor_refresh(&s_Buffer);
-            s_Redraw = true;
-        }
-        return;
+        s_PrintStats = !s_PrintStats;
+        printf("Printing stats turned %s.\n", s_PrintStats ? "on" : "off");
     }
-
-    if(keycode >= GEM_KEY_SPACE && keycode <= GEM_KEY_Z)
-    {
-        char c = mods & GEM_MOD_SHIFT ? 
-                    SHIFT_CONVERSION[keycode - GEM_KEY_SPACE] : 
-                    (char)keycode;
-        piece_tree_insert_char(&s_Buffer.contents, c, s_Buffer.cursor.offset);
-        text_buffer_move_cursor_horiz(&s_Buffer, 1);
-        s_Redraw = true;
-    }
-    else if(keycode == GEM_KEY_ENTER)
-    {
-        piece_tree_insert_char(&s_Buffer.contents, '\n', s_Buffer.cursor.offset);
-        text_buffer_set_cursor(&s_Buffer, s_Buffer.cursor.pos.line + 1, 0);
-        s_Redraw = true;
-    }
-    else if(keycode == GEM_KEY_BACKSPACE && s_Buffer.cursor.offset > 0)
-    {
-        piece_tree_delete(&s_Buffer.contents, s_Buffer.cursor.offset - 1, 1);
-        text_buffer_move_cursor_horiz(&s_Buffer, -1);
-    }
-    else if(keycode == GEM_KEY_RIGHT)
-        text_buffer_move_cursor_horiz(&s_Buffer, 1);
-    else if(keycode == GEM_KEY_LEFT)
-        text_buffer_move_cursor_horiz(&s_Buffer, -1);
-    else if(keycode == GEM_KEY_DOWN)
-        text_buffer_move_cursor_line(&s_Buffer, 1);
-    else if(keycode == GEM_KEY_UP)
-        text_buffer_move_cursor_line(&s_Buffer, -1);
+    bufwin_key_press(keycode, mods);
 }
 
-void gem_app_mouse_press(uint32_t button, uint32_t mods, int x, int y)
+void gem_mouse_press(uint32_t button, uint32_t mods, int x, int y)
 {
-    (void)mods;
-    (void)x;
-    (void)y;
-    if(button == GEM_MOUSE_SCROLL_DOWN)
-        text_buffer_move_view(&s_Buffer, 3);
-    else if(button == GEM_MOUSE_SCROLL_UP)
-        text_buffer_move_view(&s_Buffer, -3);
+    bufwin_mouse_press(button, mods, x, y);
 }
 
-void gem_app_request_redraw(void)
+void gem_request_redraw(void)
 {
     s_Redraw = true;
 }
 
-bool gem_app_needs_redraw(void)
+bool gem_needs_redraw(void)
 {
     return s_Redraw;
 }
