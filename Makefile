@@ -1,4 +1,4 @@
-CC     = clang
+CC     ?= clang
 CFLAGS := -Wall -Wextra -Werror -pedantic -std=c99 $(shell pkg-config --cflags freetype2)
 LIBS   := $(shell pkg-config --static --libs freetype2) -lX11 -lGL
 INC    = -Isrc -Idependencies/glad/include -Idependencies/stb_image
@@ -25,7 +25,7 @@ validate:: debug
 all: debug release
 
 clean:
-	rm -rf build
+	rm -rf $(BUILD_DIR)
 
 
 $(BUILD_DIR)/gemdb: $(DEBUG_OBJS) $(INT_DIR)/dependencies/glad.o $(INT_DIR)/dependencies/stb_image.o 

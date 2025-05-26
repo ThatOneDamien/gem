@@ -34,6 +34,7 @@ static QuadVertex* s_VertexData;
 static QuadVertex* s_VertexInsert;
 static uint32_t s_QuadCnt; // Quad count of current batch
 static GemRenderStats s_Stats;
+static bool s_Initialized = false;
 
 static bool create_shader_program(const char* vert_path, const char* frag_path, GLuint* program_id);
 static void draw_quad(const GemQuad* quad, const float tex[4], vec4color color, bool is_solid);
@@ -47,6 +48,7 @@ static APIENTRY void debugCallbackFunc(GLenum, GLenum, GLuint, GLenum, GLsizei, 
 
 void renderer_init(void)
 {
+    GEM_ASSERT(!s_Initialized);
 #ifdef GEM_DEBUG
     glEnable(GL_DEBUG_OUTPUT);
     glDebugMessageCallback(debugCallbackFunc, NULL);
@@ -112,17 +114,22 @@ void renderer_init(void)
     uniforms_init();
 
     GEM_ENSURE_ARGS(result, "Failed to create font at path %s.", DEFAULT_FONT);
+    s_Initialized = true;
 }
 
 void renderer_cleanup(void)
 {
-    free(s_VertexData);
-    uniforms_cleanup();
-    glDeleteProgram(s_Shader);
-    glDeleteTextures(1, &s_Font.atlas_texture);
-    glDeleteBuffers(1, &s_VBO);
-    glDeleteBuffers(1, &s_IBO);
-    glDeleteVertexArrays(1, &s_VAO);
+    if(s_Initialized)
+    {
+        s_Initialized = false;
+        free(s_VertexData);
+        uniforms_cleanup();
+        glDeleteProgram(s_Shader);
+        glDeleteTextures(1, &s_Font.atlas_texture);
+        glDeleteBuffers(1, &s_VBO);
+        glDeleteBuffers(1, &s_IBO);
+        glDeleteVertexArrays(1, &s_VAO);
+    }
 }
 
 void renderer_start_batch(void)

@@ -36,11 +36,14 @@ static FT_Library s_Library;
 static int s_FontSize = DEFAULT_FONT_SIZE; // For now only one font size is allowed globally
 static float s_LineHeight = DEFAULT_LINE_HEIGHT;
 static int s_VertAdvance = DEFAULT_VERT_ADV;
+static bool s_Initialized = false;
 
 void freetype_init(void)
 {
+    GEM_ASSERT(!s_Initialized);
     FT_Error err = FT_Init_FreeType(&s_Library);
     GEM_ENSURE_ARGS(err == FT_Err_Ok, "Freetype initialization failed (error code: %d).", err);
+    s_Initialized = true;
 }
 
 static bool get_cell_dims(FT_Face face, size_t* width, size_t* height)
@@ -160,8 +163,13 @@ clean:
 
 void freetype_cleanup(void)
 {
-    FT_Error err = FT_Done_FreeType(s_Library);
-    GEM_ENSURE_ARGS(err == FT_Err_Ok, "Freetype closed unsuccessfully (error code: %d).", err);
+    if(s_Initialized)
+    {
+        s_Initialized = false;
+        FT_Error err = FT_Done_FreeType(s_Library);
+        if(err != FT_Err_Ok)
+            exit(EXIT_FAILURE);
+    }
 }
 
 int get_font_size(void)

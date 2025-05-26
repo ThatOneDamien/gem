@@ -6,7 +6,7 @@ typedef int BufNr;
 
 void  buffer_list_init(void);
 BufNr buffer_open_empty(void);
-BufNr buffer_open_file(const char* filepath);
+BufNr buffer_open_file(char* filepath);
 bool  buffer_reopen(BufNr bufnr);
 void  buffer_close(BufNr bufnr);
 void  close_all_buffers(void);

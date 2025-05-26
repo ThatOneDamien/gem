@@ -16,9 +16,8 @@
 
 static bool s_Redraw;
 static bool s_PrintStats;
-static BufferWin s_Buffer;
 
-void gem_init(UNUSED const char* file_to_open)
+void gem_init(char* file_to_open)
 {
     // Print welcome message (TEMPORARY)
     printf("\n");
@@ -32,6 +31,7 @@ void gem_init(UNUSED const char* file_to_open)
     freetype_init();
     renderer_init();
     bufwin_init();
+    buffer_list_init();
 
     int width, height;
     window_get_dims(&width, &height);
@@ -39,8 +39,10 @@ void gem_init(UNUSED const char* file_to_open)
     bufwin_update_screen(width, height);
 
     bufwin_open(file_to_open);
-    s_Buffer.visible = true;
-    s_Buffer.text_padding = (GemPadding){ 0.0f, 0.0f, 10.0f, 0.0f };
+    BufferWin* win = bufwin_split();
+    bufwin_set_current(win);
+    bufwin_open("Makefile");
+    // printf("Bounding bl: %d,%d tr: %d,%d\n", win->bounding_box.bl.x, win->bounding_box.bl.y, win->bounding_box.tr.x, win->bounding_box.tr.y);
     s_Redraw = false;
 }
 
@@ -69,12 +71,12 @@ void gem_run(void)
     }
 }
 
-void gem_close(void)
+void gem_close(int err)
 { 
     renderer_cleanup();
     freetype_cleanup();
     window_destroy();
-    exit(EXIT_SUCCESS);
+    exit(err);
 }
 
 void gem_key_press(uint16_t keycode, uint32_t mods)

@@ -12,7 +12,7 @@ struct BufferPos
 };
 
 typedef struct PTNode PTNode;
-struct alignas(1) PTNode
+struct PTNode
 {
     BufferPos  start;
     BufferPos  end;

@@ -25,10 +25,10 @@ extern void bufwin_update_screen(int width, int height);
  * Static variables relating to the window.
  */
 static Display* s_Display;
-static int s_Screen;
 static GLXContext s_GLContext;
 static Atom s_DeleteWindowAtom;
-static uint16_t s_KeyMap[256];
+static int s_KeyMap[256];
+static int s_Screen;
 static struct
 {
     Window handle;
@@ -36,9 +36,11 @@ static struct
     int height;
     bool focused;
 } s_Window;
+static bool s_Initialized = false;
 
 void window_create(uint32_t width, uint32_t height)
 {
+    GEM_ASSERT(!s_Initialized);
     s_Display = XOpenDisplay(NULL);
     GEM_ENSURE(s_Display != NULL);
 
@@ -120,13 +122,18 @@ void window_create(uint32_t width, uint32_t height)
     s_Window.height = height;
 
     set_keymap();
+    s_Initialized = true;
 }
 
 void window_destroy(void)
 {
-    glXDestroyContext(s_Display, s_GLContext);
-    XDestroyWindow(s_Display, s_Window.handle);
-    XCloseDisplay(s_Display);
+    if(s_Initialized)
+    {
+        s_Initialized = false;
+        glXDestroyContext(s_Display, s_GLContext);
+        XDestroyWindow(s_Display, s_Window.handle);
+        XCloseDisplay(s_Display);
+    }
 }
 
 void window_dispatch_events(void)
@@ -154,7 +161,7 @@ void window_dispatch_events(void)
             break;
         }
         case DestroyNotify: {
-            gem_close();
+            gem_close(EXIT_SUCCESS);
             return;
         }
         case Expose: {
@@ -168,7 +175,7 @@ void window_dispatch_events(void)
                 return;
             if((Atom)ev.xclient.data.l[0] == s_DeleteWindowAtom)
             {
-                gem_close();
+                gem_close(EXIT_SUCCESS);
                 return;
             }
             break;
@@ -287,8 +294,10 @@ static void set_keymap(void)
     int major = 1;
     int minor = 0;
     int supported = XkbQueryExtension(s_Display, &majorOpcode, &eventBase, &errorBase, &major, &minor);
-
+    
     int scancodeMin, scancodeMax;
+
+    memset(s_KeyMap, -1, sizeof(s_KeyMap));
 
     if(supported)
     {

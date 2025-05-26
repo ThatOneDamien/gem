@@ -19,6 +19,7 @@ struct View
     BufferPos count;
 };
 
+typedef struct WinFrame WinFrame;
 typedef struct BufferWin BufferWin;
 struct BufferWin
 {
@@ -26,15 +27,18 @@ struct BufferWin
     View        view;
     GemQuad     bounding_box;
     GemPadding  text_padding;
+    WinFrame*   frame;
     int         bufnr; 
     bool        visible;
 };
 
 void bufwin_init(void);
-void bufwin_open(const char* filepath);
+void bufwin_open(char* filepath);
 void bufwin_open_bufnr(BufNr bufnr);
+BufferWin* bufwin_split(void);
 void bufwin_render_all(void);
 void bufwin_update_screen(int width, int height);
+void bufwin_set_current(BufferWin* bufwin);
 
 void bufwin_set_cursor(BufferWin* bufwin, int64_t line, int64_t column);
 void bufwin_move_cursor_line(BufferWin* bufwin, int64_t line_delta);

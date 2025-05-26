@@ -17,7 +17,7 @@ static void validate_tree(const PieceTree* pt);
 #endif
 
 typedef struct __PTNodeIntern NodeIntern;
-struct alignas(8) __PTNodeIntern
+struct __PTNodeIntern
 {
     PTNode node;
     bool   free;
@@ -907,6 +907,7 @@ static void delete_node(PieceTree* pt, PTNode* node)
 static void bubble_meta_changes(PieceTree* pt, PTNode* node, PTNode* stop,
                                 int64_t size_delta, int64_t newln_delta)
 {
+    (void)pt; // For release
     GEM_ASSERT(node == SENTINEL || is_valid_node(pt, node));
     while(node != stop && node->parent != SENTINEL)
     {
@@ -972,6 +973,7 @@ static PTNode* node_at_offset(PieceTree* pt, size_t offset, size_t* node_start_o
     }
 
     GEM_ERROR("This should not have been reached.");
+    *node_start_offset = 0;
     return NULL;
 }
 
@@ -1085,16 +1087,17 @@ static void expand_node_storage(PieceTree* pt, size_t increase)
     if(increase == 0 || increase <= s->free_count)
         return;
 
-    NodeIntern* prev_pointer = s->nodes;
+    uintptr_t prev_pointer = (uintptr_t)s->nodes;
     size_t prev_cap = s->capacity;
     size_t new_cap = s->capacity + increase;
     new_cap += new_cap >> 1;
 
     s->nodes = realloc(s->nodes, sizeof(NodeIntern) * new_cap);
     GEM_ENSURE(s->nodes != NULL);
-    if(prev_pointer != s->nodes)
+    uintptr_t new_pointer = (uintptr_t)s->nodes;
+    if(prev_pointer != new_pointer)
     {
-        uintptr_t delta = (uintptr_t)s->nodes - (uintptr_t)prev_pointer;
+        uintptr_t delta = new_pointer - prev_pointer;
         fix_pointer(&pt->root, delta);
         for(NodeIntern* intern = s->nodes; intern < s->nodes + prev_cap; intern++)
         {

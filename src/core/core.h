@@ -1,4 +1,5 @@
 #pragma once
+#include "app.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -52,22 +53,24 @@
         if(!(cond))                                                                 \
         {                                                                           \
             GEM_ERROR_ARGS("Ensure failed (%s: %d): %s", __FILE__, __LINE__, #cond) \
-            exit(EXIT_FAILURE);                                                     \
+            gem_close(EXIT_FAILURE);                                                \
         }                                                                           \
     }
-#define GEM_ENSURE_MSG(cond, msg)              \
-    {                                          \
-        if(!(cond))                            \
-        {                                      \
-            GEM_ERROR(msg) exit(EXIT_FAILURE); \
-        }                                      \
+#define GEM_ENSURE_MSG(cond, msg)       \
+    {                                   \
+        if(!(cond))                     \
+        {                               \
+            GEM_ERROR(msg)              \
+            gem_close(EXIT_FAILURE);    \
+        }                               \
     }
-#define GEM_ENSURE_ARGS(cond, msg, ...)                          \
-    {                                                            \
-        if(!(cond))                                              \
-        {                                                        \
-            GEM_ERROR_ARGS(msg, __VA_ARGS__) exit(EXIT_FAILURE); \
-        }                                                        \
+#define GEM_ENSURE_ARGS(cond, msg, ...)         \
+    {                                           \
+        if(!(cond))                             \
+        {                                       \
+            GEM_ERROR_ARGS(msg, __VA_ARGS__)    \
+            gem_close(EXIT_FAILURE);            \
+        }                                       \
     }
 
 #ifdef __GNUC__
