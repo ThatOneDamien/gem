@@ -15,15 +15,16 @@
 
 #define TEXT_VERT_SHADER "assets/shaders/basic.vert"
 #define TEXT_FRAG_SHADER "assets/shaders/basic.frag"
-#define DEFAULT_FONT     "assets/fonts/JetBrainsMono-SemiBold.ttf"
+#define DEFAULT_FONT     "assets/fonts/JetBrainsMono-Regular.ttf"
 
-typedef struct
+typedef struct QuadVertex QuadVertex;
+struct QuadVertex
 {
     float     position[2];
     float     tex_coords[2];
     vec4color color;
     float     solid;
-} QuadVertex;
+};
 
 static GLuint s_VAO;
 static GLuint s_VBO;
@@ -175,7 +176,7 @@ static void draw_char(char c, vec2pos pos, vec4color color)
     draw_quad(&char_quad, data->tex_coords, color, false);
 }
 
-static void handle_str(const char* str, size_t count, const GemQuad* bounding_box, 
+static void UNUSED handle_str(const char* str, size_t count, const GemQuad* bounding_box, 
                        const View* view, BufferPos* pos)
 {
     int vert_adv = get_vert_advance();
@@ -207,7 +208,7 @@ static void handle_str(const char* str, size_t count, const GemQuad* bounding_bo
     }
 }
 
-static void draw_cursor(const Cursor* cur, const View* view, vec2pos top_left)
+static void UNUSED draw_cursor(const Cursor* cur, const View* view, vec2pos top_left)
 {
     int64_t rel_line = cur->vis.line - view->start.line;
     int64_t rel_col = cur->vis.column - view->start.column;
@@ -228,19 +229,23 @@ static void draw_cursor(const Cursor* cur, const View* view, vec2pos top_left)
 
 }
 
-void renderer_draw_bufwin(const BufferWin* bufwin)
+void renderer_draw_bufwin(const BufferWin* bufwin, bool active)
 {
     GEM_ASSERT(bufwin != NULL);
 
     const PieceTree* pt = buffer_get_pt(bufwin->bufnr);
-    const GemQuad* buf_bb = &bufwin->bounding_box;
+    const GemQuad* buf_bb = bufwin_get_bb(bufwin);
+    
+    // Draw background
+    draw_quad(buf_bb, NULL, (vec4color){0.02f, 0.03f, 0.05f, 1.0f}, true);
+
     uint32_t num_pad = s_Font.advance / 4;
-    uint32_t line_num_width = pt->line_cnt < 1000 ? 4 : (log10((double)pt->line_cnt + 1.0) + 2);
+    uint32_t line_num_width = pt->line_cnt < 1000 ? 4 : (log10((double)pt->line_cnt) + 2);
     GemQuad line_sidebar = make_quad(buf_bb->bl.x,
-                                     buf_bb->bl.y,
+                                     buf_bb->bl.y + 1,
                                      buf_bb->bl.x + s_Font.advance * line_num_width + num_pad * 2,
                                      buf_bb->tr.y);
-    
+
     GemQuad text_bb = make_quad(line_sidebar.tr.x + bufwin->text_padding.left,
                                 buf_bb->bl.y - bufwin->text_padding.bottom,
                                 buf_bb->tr.x - bufwin->text_padding.right,
@@ -293,6 +298,8 @@ void renderer_draw_bufwin(const BufferWin* bufwin)
     pen.x = text_bb.bl.x;
     pen.y = text_bb.tr.y;
     draw_cursor(&bufwin->cursor, &bufwin->view, pen); 
+    if(!active)
+        draw_quad(buf_bb, NULL, (vec4color){0.0f, 0.0f, 0.0f, 0.4f}, true);
 }
 
 const GemFont* gem_get_font(void)

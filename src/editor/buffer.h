@@ -10,5 +10,7 @@ BufNr buffer_open_file(char* filepath);
 bool  buffer_reopen(BufNr bufnr);
 void  buffer_close(BufNr bufnr);
 void  close_all_buffers(void);
+int   open_buffer_count(void);
 
 const PieceTree* buffer_get_pt(BufNr bufnr);
+const char*      buffer_get_path(BufNr bufnr);

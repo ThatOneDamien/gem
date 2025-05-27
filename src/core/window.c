@@ -27,6 +27,10 @@ extern void bufwin_update_screen(int width, int height);
 static Display* s_Display;
 static GLXContext s_GLContext;
 static Atom s_DeleteWindowAtom;
+static Atom s_StateAtom;
+static Atom s_FullscreenAtom;
+static Atom s_MaximizeHAtom;
+static Atom s_MaximizeVAtom;
 static int s_KeyMap[256];
 static int s_Screen;
 static struct
@@ -70,16 +74,16 @@ void window_create(uint32_t width, uint32_t height)
     };
     const unsigned long value_mask = CWBackPixel | CWColormap | CWBorderPixel | CWEventMask;
 
-    s_Window.handle = XCreateWindow(s_Display,                         // Display
-                             RootWindow(s_Display, s_Screen), // Parent Window
-                             0, 0,                              // Location
-                             width, height,                     // Width and Height
-                             0,                                 // Border Width
-                             vi->depth,                   // Depth
-                             InputOutput,                       // Class
-                             vi->visual,                  // Visual
-                             value_mask,                        // Value Mask
-                             &window_attribs);                  // Window Attributes
+    s_Window.handle = XCreateWindow(s_Display,                          // Display
+                                    RootWindow(s_Display, s_Screen),    // Parent Window
+                                    0, 0,                               // Location
+                                    width, height,                      // Width and Height
+                                    1,                                  // Border Width
+                                    vi->depth,                          // Depth
+                                    InputOutput,                        // Class
+                                    vi->visual,                         // Visual
+                                    value_mask,                         // Value Mask
+                                    &window_attribs);                   // Window Attributes
 
 
     XFree(vi);
@@ -105,7 +109,11 @@ void window_create(uint32_t width, uint32_t height)
     XMapRaised(s_Display, s_Window.handle);
     Xutf8SetWMProperties(s_Display, s_Window.handle, "Gem", "Gem", NULL, 0, NULL, NULL, NULL);
 
-    s_DeleteWindowAtom = XInternAtom(s_Display, "WM_DELETE_WINDOW", False);
+    s_DeleteWindowAtom = XInternAtom(s_Display, "WM_DELETE_WINDOW", True);
+    s_StateAtom = XInternAtom(s_Display, "_NET_WM_STATE", True);
+    s_FullscreenAtom = XInternAtom(s_Display, "_NET_WM_STATE_FULLSCREEN", True);
+    s_MaximizeHAtom = XInternAtom(s_Display, "_NET_WM_STATE_MAXIMIZED_HORZ", True);
+    s_MaximizeVAtom = XInternAtom(s_Display, "_NET_WM_STATE_MAXIMIZED_VERT", True);
     XSetWMProtocols(s_Display, s_Window.handle, &s_DeleteWindowAtom, 1);
 
     XSizeHints sizeHints;
@@ -214,6 +222,37 @@ void window_get_dims(int* width, int* height)
     GEM_ASSERT(height != NULL);
     *width = s_Window.width;
     *height = s_Window.height;
+}
+
+void window_toggle_fullscreen(void)
+{
+    XEvent ev;
+    ev.type = ClientMessage;
+    ev.xclient.window = s_Window.handle;
+    ev.xclient.message_type = s_StateAtom;
+    ev.xclient.format = 32;
+    ev.xclient.data.l[0] = 2;
+    ev.xclient.data.l[1] = s_FullscreenAtom;
+    ev.xclient.data.l[2] = 0;
+    ev.xclient.data.l[3] = 1;
+    ev.xclient.data.l[4] = 0;
+    XSendEvent(s_Display, RootWindow(s_Display, s_Screen), False, ClientMessage, &ev);
+}
+
+void window_toggle_maximize(void)
+{
+    XEvent ev;
+    ev.type = ClientMessage;
+    ev.xclient.window = s_Window.handle;
+    ev.xclient.message_type = s_StateAtom;
+    ev.xclient.format = 32;
+    ev.xclient.data.l[0] = 2;
+    ev.xclient.data.l[1] = s_MaximizeHAtom;
+    ev.xclient.data.l[2] = s_MaximizeVAtom;
+    ev.xclient.data.l[3] = 1;
+    ev.xclient.data.l[4] = 0;
+    XSendEvent(s_Display, RootWindow(s_Display, s_Screen), False, ClientMessage, &ev);
+
 }
 
 static bool extension_supported(const char* extension)

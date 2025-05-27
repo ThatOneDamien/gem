@@ -10,10 +10,11 @@
 
 #define MIN(x, y) ((x) > (y) ? (y) : (x))
 
+static void      render_frame(WinFrame* frame);
+static void      update_frame(WinFrame* frame, GemQuad* cur); //Temporary
 static BufferPos actual_to_vis(const BufferWin* bufwin, BufferPos actual);
 static BufferPos vis_to_actual(const BufferWin* bufwin, BufferPos vis);
 static void      clamp_val(int64_t* val, int64_t min, int64_t max);
-static void update_frame(WinFrame* frame, GemQuad* cur); //Temporary
 
 enum
 {
@@ -28,18 +29,15 @@ struct WinFrame
     WinFrame*  left;
     WinFrame*  right;
     BufferWin* bufwin;
-    // int        width;
-    // int        height;
+    GemQuad    bounding_box;
     uint8_t    type;
 };
 
 static BufferWin* s_CurrentWindow;
 static WinFrame s_RootFrame;
 
-void bufwin_init(void)
+void bufwin_init_root_frame(void)
 {
-    // TODO: Make this system dynamically allocated like
-    // the piece tree node storage and the buffer array.
     s_CurrentWindow = calloc(1, sizeof(BufferWin));
     s_CurrentWindow->visible = true;
     s_CurrentWindow->text_padding.left = 10;
@@ -49,15 +47,12 @@ void bufwin_init(void)
     s_RootFrame.left = NULL;
     s_RootFrame.right = NULL;
     s_RootFrame.bufwin = s_CurrentWindow;
-    // s_RootFrame.width = 0;
-    // s_RootFrame.height = 0;
     s_RootFrame.type = FRAME_TYPE_LEAF;
 }
 
 void bufwin_open(char* filepath)
 {
     GEM_ASSERT(s_CurrentWindow != NULL);
-    // todo: close previous buffer if one was open.
     s_CurrentWindow->bufnr = filepath == NULL ?
                         buffer_open_empty() :
                         buffer_open_file(filepath);
@@ -73,101 +68,40 @@ void bufwin_open_bufnr(BufNr bufnr)
         s_CurrentWindow->bufnr = bufnr;
 }
 
-BufferWin* bufwin_split(void)
+BufferWin* bufwin_split(bool vsplit)
 {
     GEM_ASSERT(s_CurrentWindow != NULL);
     GEM_ASSERT(s_CurrentWindow->frame != NULL);
     WinFrame* frame = s_CurrentWindow->frame;
-    frame->type = FRAME_TYPE_VSPLIT;
+    frame->type = vsplit ? FRAME_TYPE_VSPLIT : FRAME_TYPE_HSPLIT;
     frame->bufwin = NULL;
     frame->left = malloc(sizeof(WinFrame));
     GEM_ENSURE(frame->left != NULL);
     frame->left->type = FRAME_TYPE_LEAF;
     frame->left->parent = frame;
     frame->left->bufwin = s_CurrentWindow;
-    // frame->left->width = frame->width;
-    // frame->left->height = frame->height / 2;
     s_CurrentWindow->frame = frame->left;
 
     BufferWin* new_win = calloc(1, sizeof(BufferWin));
     GEM_ENSURE(new_win != NULL);
     new_win->visible = true;
     new_win->text_padding.left = 10;
+    new_win->bufnr = s_CurrentWindow->bufnr;
     frame->right = malloc(sizeof(WinFrame));
     GEM_ENSURE(frame->right != NULL);
     frame->right->type = FRAME_TYPE_LEAF;
     frame->right->parent = frame;
     frame->right->bufwin = new_win;
-    // frame->right->width = frame->width;
-    // frame->right->height = frame->height - frame->left->height;
     new_win->frame = frame->right;
-    GemQuad initial = s_CurrentWindow->bounding_box;
+    GemQuad initial = frame->bounding_box;
     update_frame(frame, &initial);
 
     return new_win;
 }
 
-static void render_frame(WinFrame* frame)
+BufNr bufwin_get_bufnr(void)
 {
-    GEM_ASSERT(frame != NULL);
-    if(frame->type == FRAME_TYPE_LEAF)
-        renderer_draw_bufwin(frame->bufwin);
-    else
-    {
-        render_frame(frame->left);
-        render_frame(frame->right);
-    }
-}
-
-void bufwin_render_all(void)
-{
-    GEM_ASSERT(s_CurrentWindow != NULL);
-    render_frame(&s_RootFrame);
-}
-
-static void update_frame(WinFrame* frame, GemQuad* cur)
-{
-    if(frame->type == FRAME_TYPE_LEAF)
-    {
-        frame->bufwin->bounding_box = *cur;
-        bufwin_update_view(frame->bufwin);
-        return;
-    }
-
-    GemQuad next;
-    memset(&next, 0, sizeof(GemQuad));
-    next.bl.x = cur->bl.x;
-    next.tr.y = cur->tr.y;
-    if(frame->type == FRAME_TYPE_HSPLIT)
-    {
-        next.tr.x = cur->tr.x;
-        next.bl.y = (cur->bl.y - cur->tr.y) / 2;
-    }
-    else
-    {
-        next.tr.x = (cur->tr.x - cur->bl.x) / 2;
-        next.bl.y = cur->bl.y;
-    }
-    update_frame(frame->left, &next);
-    if(frame->type == FRAME_TYPE_HSPLIT)
-    {
-        next.tr.y = next.bl.y;
-        next.bl.y = cur->bl.y;
-    }
-    else
-    {
-        next.bl.x = next.tr.x;
-        next.tr.x = cur->tr.x;
-    }
-    update_frame(frame->right, &next);
-}
-
-void bufwin_update_screen(int width, int height)
-{
-    // s_RootFrame.width = width;
-    // s_RootFrame.height = height;
-    GemQuad full_screen = make_quad(0, height, width, 0);
-    update_frame(&s_RootFrame, &full_screen);
+    return s_CurrentWindow->bufnr;
 }
 
 void bufwin_set_current(BufferWin* bufwin)
@@ -176,13 +110,54 @@ void bufwin_set_current(BufferWin* bufwin)
     s_CurrentWindow = bufwin;
 }
 
-//
-// void bufwin_close(BufferWin* bufwin)
-// {
-//     GEM_ASSERT(bufwin != NULL);
-//     buffer_close(bufwin->bufnr);
-// }
-//
+
+
+void bufwin_close(void)
+{
+    GEM_ASSERT(s_CurrentWindow != NULL);
+    if(s_CurrentWindow->frame == &s_RootFrame)
+    {
+        printf("Tried to delete root frame.\n");
+        return;
+    }
+    WinFrame* frame = s_CurrentWindow->frame;
+    WinFrame* parent = frame->parent;
+    WinFrame* left;
+    WinFrame* right;
+    WinFrame* other;
+    if(frame == parent->left)
+    {
+        left = frame;
+        right = parent->right;
+        other = right;
+    }
+    else
+    {
+        left = parent->left;
+        right = frame;
+        other = left;
+    }
+    GemQuad* bb = &other->bounding_box;
+    GemQuad* bbl = &left->bounding_box;
+    GemQuad* bbr = &right->bounding_box;
+    bb->bl.x = bbl->bl.x;
+    bb->bl.y = bbr->bl.y;
+    bb->tr.x = bbr->tr.x;
+    bb->tr.y = bbl->tr.y;
+    
+    parent->left = NULL;
+    parent->right = NULL;
+    parent->bufwin = other->bufwin;
+    parent->bufwin->frame = parent;
+    parent->type = FRAME_TYPE_LEAF;
+    free(left);
+    free(right);
+    bufwin_update_view(parent->bufwin);
+
+    free(s_CurrentWindow);
+    s_CurrentWindow = parent->bufwin;
+}
+
 
 void bufwin_set_cursor(BufferWin* bufwin, int64_t line, int64_t column)
 {
@@ -309,13 +284,33 @@ void bufwin_update_view(BufferWin* bufwin)
 {
     GEM_ASSERT(bufwin != NULL);
     uint32_t adv = gem_get_font()->advance;
-    int vert_sz = bufwin->bounding_box.bl.y - bufwin->bounding_box.tr.y -
-                  bufwin->text_padding.bottom - bufwin->text_padding.top;
-    int hori_sz = bufwin->bounding_box.tr.x - bufwin->bounding_box.bl.x -
-                  bufwin->text_padding.left - bufwin->text_padding.right - 
+    GemQuad* bb = &bufwin->frame->bounding_box;
+    GemPadding* tp = &bufwin->text_padding;
+
+    int vert_sz = bb->bl.y - bb->tr.y -
+                  tp->bottom - tp->top;
+    int hori_sz = bb->tr.x - bb->bl.x -
+                  tp->left - tp->right - 
                   adv * 5 + (adv >> 2);
+
     bufwin->view.count.line = vert_sz / get_vert_advance() + 1;
     bufwin->view.count.column = hori_sz / adv + 1;
+}
+
+
+void bufwin_render_all(void)
+{
+    GEM_ASSERT(s_CurrentWindow != NULL);
+    render_frame(&s_RootFrame);
+}
+
+
+void bufwin_update_screen(int width, int height)
+{
+    // s_RootFrame.width = width;
+    // s_RootFrame.height = height;
+    GemQuad full_screen = make_quad(0, height, width, 0);
+    update_frame(&s_RootFrame, &full_screen);
 }
 
 void bufwin_key_press(uint16_t keycode, uint32_t mods)
@@ -340,10 +335,10 @@ void bufwin_key_press(uint16_t keycode, uint32_t mods)
         }
         else if(keycode == GEM_KEY_S)
         {
-            if(write_buffer(s_CurrentWindow->bufnr, "temp.txt"))
-                printf("Wrote %lu bytes to temp.txt\n", pt->size);
+            if(write_buffer(s_CurrentWindow->bufnr))
+                printf("Wrote %lu bytes to %s\n", pt->size, buffer_get_path(s_CurrentWindow->bufnr));
             else
-                printf("Failed to write to temp.txt\n");
+                printf("Failed to write to %s\n", buffer_get_path(s_CurrentWindow->bufnr));
         }
         else if(keycode == GEM_KEY_D && mods & GEM_MOD_SHIFT && pt->size > 0)
         {
@@ -436,14 +431,27 @@ void bufwin_key_press(uint16_t keycode, uint32_t mods)
 void bufwin_mouse_press(uint32_t button, uint32_t mods, int x, int y)
 {
     (void)mods;
-    (void)x;
-    (void)y;
     if(button == GEM_MOUSE_SCROLL_DOWN)
         bufwin_move_view(s_CurrentWindow, 3);
     else if(button == GEM_MOUSE_SCROLL_UP)
         bufwin_move_view(s_CurrentWindow, -3);
-    // else if(button == GEM_MOUSE_BUTTON_LEFT)
-    //
+    else if(button == GEM_MOUSE_BUTTON_LEFT)
+    {
+        if(!quad_contains(&s_CurrentWindow->frame->bounding_box, x, y))
+        {
+            WinFrame* frame = &s_RootFrame;
+            while(frame->type != FRAME_TYPE_LEAF)
+            {
+                if(quad_contains(&frame->left->bounding_box, x, y))
+                    frame = frame->left;
+                else
+                    frame = frame->right;
+            }
+            s_CurrentWindow = frame->bufwin;
+            gem_request_redraw();
+        }
+        
+    }
 }
 
 void bufwin_print_cursor_loc(const BufferWin* bufwin)
@@ -463,6 +471,61 @@ void bufwin_print_view(const BufferWin* bufwin)
     printf("View Information:\n");
     printf("  Start: %lu,%lu\n", v->start.line, v->start.column);
     printf("  Count: %lu lines, %lu columns\n", v->count.line, v->count.column);
+}
+
+const GemQuad* bufwin_get_bb(const BufferWin* bufwin)
+{
+    GEM_ASSERT(bufwin != NULL);
+    return &bufwin->frame->bounding_box;
+}
+
+static void render_frame(WinFrame* frame)
+{
+    GEM_ASSERT(frame != NULL);
+    if(frame->type == FRAME_TYPE_LEAF)
+        renderer_draw_bufwin(frame->bufwin, frame->bufwin == s_CurrentWindow);
+    else
+    {
+        render_frame(frame->left);
+        render_frame(frame->right);
+    }
+}
+
+static void update_frame(WinFrame* frame, GemQuad* cur)
+{
+    frame->bounding_box = *cur;
+    if(frame->type == FRAME_TYPE_LEAF)
+    {
+        bufwin_update_view(frame->bufwin);
+        return;
+    }
+
+    GemQuad next;
+    memset(&next, 0, sizeof(GemQuad));
+    next.bl.x = cur->bl.x;
+    next.tr.y = cur->tr.y;
+    if(frame->type == FRAME_TYPE_HSPLIT)
+    {
+        next.tr.x = cur->tr.x;
+        next.bl.y = (cur->bl.y + cur->tr.y) / 2;
+    }
+    else
+    {
+        next.tr.x = (cur->bl.x + cur->tr.x) / 2;
+        next.bl.y = cur->bl.y;
+    }
+    update_frame(frame->left, &next);
+    if(frame->type == FRAME_TYPE_HSPLIT)
+    {
+        next.tr.y = next.bl.y;
+        next.bl.y = cur->bl.y;
+    }
+    else
+    {
+        next.bl.x = next.tr.x;
+        next.tr.x = cur->tr.x;
+    }
+    update_frame(frame->right, &next);
 }
 
 static BufferPos actual_to_vis(const BufferWin* bufwin, BufferPos actual)
@@ -534,3 +597,4 @@ static void clamp_val(int64_t* val, int64_t min, int64_t max)
     else if(*val > max)
         *val = max;
 }
+

@@ -9,3 +9,5 @@ void window_destroy(void);
 void window_dispatch_events(void);
 void window_swap(void);
 void window_get_dims(int* width, int* height);
+void window_toggle_fullscreen(void);
+void window_toggle_maximize(void);

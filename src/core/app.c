@@ -30,7 +30,7 @@ void gem_init(char* file_to_open)
     window_create(GEM_INITIAL_WIDTH, GEM_INITIAL_HEIGHT);
     freetype_init();
     renderer_init();
-    bufwin_init();
+    bufwin_init_root_frame();
     buffer_list_init();
 
     int width, height;
@@ -39,10 +39,6 @@ void gem_init(char* file_to_open)
     bufwin_update_screen(width, height);
 
     bufwin_open(file_to_open);
-    BufferWin* win = bufwin_split();
-    bufwin_set_current(win);
-    bufwin_open("Makefile");
-    // printf("Bounding bl: %d,%d tr: %d,%d\n", win->bounding_box.bl.x, win->bounding_box.bl.y, win->bounding_box.tr.x, win->bounding_box.tr.y);
     s_Redraw = false;
 }
 
@@ -81,12 +77,42 @@ void gem_close(int err)
 
 void gem_key_press(uint16_t keycode, uint32_t mods)
 {
-    if(mods & GEM_MOD_CONTROL && keycode == GEM_KEY_P)
+    bool handeled = true;
+    if(mods & GEM_MOD_CONTROL)
     {
-        s_PrintStats = !s_PrintStats;
-        printf("Printing stats turned %s.\n", s_PrintStats ? "on" : "off");
+        if(keycode == GEM_KEY_P)
+        {
+            s_PrintStats = !s_PrintStats;
+            printf("Printing stats turned %s.\n", s_PrintStats ? "on" : "off");
+        }
+        else if(keycode == GEM_KEY_C)
+        {
+            bufwin_close();
+            s_Redraw = true;
+        }
+        else if(keycode == GEM_KEY_V)
+        {
+            bufwin_split(~mods & GEM_MOD_SHIFT);
+            s_Redraw = true;
+        }
+        else if(keycode == GEM_KEY_O)
+        {
+            bufwin_open("README.md");
+            printf("Open Buffers: %d\n", open_buffer_count());
+            s_Redraw = true;
+        }
+        else
+            handeled = false;
     }
-    bufwin_key_press(keycode, mods);
+    else if(mods & GEM_MOD_ALT && keycode == GEM_KEY_ENTER)
+    {
+        window_toggle_maximize();
+        return;
+    }
+    else
+        handeled = false;
+    if(!handeled)
+        bufwin_key_press(keycode, mods);
 }
 
 void gem_mouse_press(uint32_t button, uint32_t mods, int x, int y)

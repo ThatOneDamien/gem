@@ -134,6 +134,7 @@
 #define GEM_MOD_SHIFT              (1 << 0)
 #define GEM_MOD_CAPS               (1 << 1)
 #define GEM_MOD_CONTROL            (1 << 2)
+#define GEM_MOD_ALT                (1 << 3)
 
 // Mouse button macros
 #define GEM_MOUSE_BUTTON_NONE      0

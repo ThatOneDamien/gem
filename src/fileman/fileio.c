@@ -59,9 +59,10 @@ end:
     return success;
 }
 
-bool write_buffer(BufNr bufnr, const char* path)
+bool write_buffer_as(BufNr bufnr, const char* path)
 {
-    GEM_ASSERT(path != NULL);
+    if(path == NULL)
+        return false;
 
     bool success = false;
     int fd;

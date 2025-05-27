@@ -139,11 +139,23 @@ void close_all_buffers(void)
     // da_free_data(&s_Buffers);
 }
 
+int open_buffer_count(void)
+{
+    return s_Buffers.capacity - s_Buffers.free_count;
+}
+
 const PieceTree* buffer_get_pt(BufNr bufnr)
 {
     GEM_ASSERT(is_valid_buf(bufnr));
     Buffer* buf = s_Buffers.buffers + bufnr;
     return &buf->contents;
+}
+
+const char* buffer_get_path(BufNr bufnr)
+{
+    GEM_ASSERT(is_valid_buf(bufnr));
+    Buffer* buf = s_Buffers.buffers + bufnr;
+    return buf->filepath;
 }
 
 static void ensure_free(size_t count)
