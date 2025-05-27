@@ -233,7 +233,7 @@ void renderer_draw_bufwin(const BufferWin* bufwin, bool active)
 {
     GEM_ASSERT(bufwin != NULL);
 
-    const PieceTree* pt = buffer_get_pt(bufwin->bufnr);
+    const PieceTree* pt = &buffer_get(bufwin->bufnr)->contents;
     const GemQuad* buf_bb = bufwin_get_bb(bufwin);
     
     // Draw background
@@ -320,7 +320,7 @@ static bool create_shader_program(const char* vert_path, const char* frag_path, 
 
     char* src;
     size_t src_size;
-    read_entire_file(vert_path, &src, &src_size);
+    read_entire_file(vert_path, &src, &src_size, NULL);
 
     glShaderSource(vert, 1, (const GLchar* const*)&src, (const GLint*)&src_size);
     free(src);
@@ -335,7 +335,7 @@ static bool create_shader_program(const char* vert_path, const char* frag_path, 
     }
 
 
-    read_entire_file(frag_path, &src, &src_size);
+    read_entire_file(frag_path, &src, &src_size, NULL);
     glShaderSource(frag, 1, (const GLchar* const*)&src, (const GLint*)&src_size);
     free(src);
     glCompileShader(frag);

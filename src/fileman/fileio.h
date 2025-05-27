@@ -4,10 +4,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-bool read_entire_file(const char* path, char** src, size_t* size);
-bool write_buffer_as(BufNr bufnr, const char* path);
+bool read_entire_file(const char* path, char** src, size_t* size, bool* readonly);
+bool save_buffer_as(BufNr bufnr, const char* path);
 
-static inline bool write_buffer(BufNr bufnr)
+static inline bool save_buffer(BufNr bufnr)
 { 
-    return write_buffer_as(bufnr, buffer_get_path(bufnr)); 
+    return save_buffer_as(bufnr, NULL);
 }

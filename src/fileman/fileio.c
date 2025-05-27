@@ -7,62 +7,80 @@
 
 #define MAX_FILE_SIZE (1ull << 25) // This is 32MiB, temporary
 
-bool read_entire_file(const char* path, char** src, size_t* size)
+bool read_entire_file(const char* path, char** src, size_t* size, bool* readonly)
 {
     GEM_ASSERT(path != NULL);
     GEM_ASSERT(src != NULL);
-    GEM_ASSERT(size != NULL);
 
     bool success = false;
     char* buf = NULL;
-    size_t total_read = 0;
+    off_t total_read = 0;
     int fd;
 
     *src = NULL;
-    fd = open(path, O_RDONLY);
-    if(fd == -1)
-        return false;
+    fd = open(path, O_RDWR);
+    if(fd < 0)
+    {
+        if(readonly != NULL)
+            *readonly = true;
+        fd = open(path, O_RDONLY);
+        if(fd < 0)
+            return false;
+    }
+    else if(readonly != NULL)
+        *readonly = false;
 
     off_t file_size = lseek(fd, 0, SEEK_END);
-    if(file_size <= 0 || (size_t)file_size > MAX_FILE_SIZE)
+    if(file_size < 0 || (size_t)file_size > MAX_FILE_SIZE)
+        goto end;
+    if(file_size == 0)
+    {
+        *size = 0;
+        return true;
+    }
+
+    if(lseek(fd, 0, SEEK_SET) < 0)
         goto end;
 
-    *size = (size_t)file_size;
-
-    if(lseek(fd, 0, SEEK_SET) == -1)
-        goto end;
-
-    buf = malloc(*size + 1);
+    buf = malloc(file_size + 1);
     GEM_ENSURE(buf != NULL);
 
     do
     {
-        ssize_t temp = read(fd, buf + total_read, *size - total_read);
+        ssize_t temp = read(fd, buf + total_read, file_size - total_read);
         if(temp <= 0)
             break;
         total_read += temp;
-    } while(*size > total_read);
+    } while(file_size > total_read);
         
 
-    if(total_read != *size)
+    if(total_read != file_size)
     {
         free(buf);
         goto end;
     }
 
-    buf[*size] = '\0';
+    buf[file_size] = '\0';
     *src = buf;
     success = true;
-
+    if(size != NULL)
+        *size = (size_t)file_size;
 end:
     close(fd);
     return success;
 }
 
-bool write_buffer_as(BufNr bufnr, const char* path)
+bool save_buffer_as(BufNr bufnr, const char* path)
 {
+    Buffer* buf = buffer_get(bufnr);
+    if(buf->modified == false)
+        return true;
     if(path == NULL)
-        return false;
+    {
+        if(buf->filepath == NULL)
+            return false;
+        path = buf->filepath;
+    }
 
     bool success = false;
     int fd;
@@ -71,7 +89,7 @@ bool write_buffer_as(BufNr bufnr, const char* path)
     if(fd == -1)
         return false;
 
-    const PieceTree* pt = buffer_get_pt(bufnr);
+    const PieceTree* pt = &buf->contents; 
     const PTNode* node = piece_tree_next_inorder(pt, NULL);
     size_t total_written = 0;
     while(node != NULL)
@@ -97,6 +115,7 @@ bool write_buffer_as(BufNr bufnr, const char* path)
         write(fd, &c, 1);
         fsync(fd);
         success = true;
+        buf->modified = false;
     }
 
     close(fd);

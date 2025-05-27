@@ -24,6 +24,7 @@ struct __PTNodeIntern
     size_t next;
 };
 
+static void    insert_node(PieceTree* pt, PTNode* new, size_t offset);
 static PTNode* split_node(PieceTree* pt, PTNode* node, size_t left_size, size_t right_size);
 static void    fix_insert(PieceTree* pt, PTNode* node);
 static void    left_rotate(PieceTree* pt, PTNode* node);
@@ -55,7 +56,6 @@ static PTNode s_Sentinel = {
 };
 static PTNode* const SENTINEL = &s_Sentinel;
 
-// TODO: Change this to take ownership of the pointer so copying isnt necessary.
 void piece_tree_init(PieceTree* pt, const char* original_src, size_t size, bool copy)
 {
     GEM_ASSERT(pt != NULL);
@@ -136,113 +136,56 @@ void piece_tree_free(PieceTree* pt)
     da_free_data(&pt->added.line_starts);
 }
 
-void piece_tree_insert(PieceTree* pt, const char* data, size_t count, size_t offset)
+void piece_tree_insert(PieceTree* pt, const char* data, size_t len, size_t offset)
 {
     GEM_ASSERT(pt != NULL);
     GEM_ASSERT(data != NULL);
     GEM_ASSERT(offset <= pt->size);
-    if(count == 0 || data[0] == '\0')
+    if(len == 0)
         return;
 
     expand_node_storage(pt, 2);
 
-    PTNode* node;
-    PTNode* new = create_node_and_append(pt, data, count);
-    size_t  node_start_offset;
+    PTNode* new = create_node_and_append(pt, data, len);
+    insert_node(pt, new, offset);
+}
 
-    if(pt->root == SENTINEL)
-    {
-        pt->root = new;
-        pt->root->is_black = true;
-        PT_VALIDATE(pt);
+void piece_tree_insert_repeat(PieceTree* pt, const char* data, size_t len, 
+                              size_t rep_count, size_t offset)
+{
+    GEM_ASSERT(pt != NULL);
+    GEM_ASSERT(data != NULL);
+    GEM_ASSERT(offset <= pt->size);
+    if(len == 0)
         return;
-    }
 
-    // The only case where we insert to the left of a node is
-    // when we are inserting at the very beginning of the document.
-    // This ensures we append as much as possible.
-    if(offset == 0) 
+    expand_node_storage(pt, 2);
+
+    PTNode* new = alloc_node(pt);
+    *new = node_default();
+    new->length = len * rep_count;
+
+    PTPosDA* ls = &pt->added.line_starts;
+    new->start.line = ls->size - 1;
+    new->start.column = pt->added.size - ls->data[ls->size - 1];
+
+    for(size_t i = 0; i < rep_count; ++i)
     {
-        node = left_test(pt->root);
-        new->parent = node;
-        node->left = new;
-        bubble_meta_changes(pt, new, pt->root, new->length, new->nl_cnt);
-        fix_insert(pt, new);
-        PT_VALIDATE(pt);
-        return;
-    }
-
-    node = node_at_offset(pt, offset, &node_start_offset, true);
-
-    GEM_ASSERT(offset > node_start_offset);
-    if(node_start_offset + node->length > offset) // Split node
-    {
-        size_t node_new_len = offset - node_start_offset;
-        PTNode* split = split_node(pt, node, node_new_len, node->length - node_new_len);
-
-        if(node->right == SENTINEL) 
-        {
-            node->right = split;
-            split->parent = node;
-        }
-        else
-        {
-            PTNode* leftmost = node->right;
-            while(leftmost->left != SENTINEL)
+        for(size_t j = 0; j < len; ++j)
+            if(data[i] == '\n')
             {
-                leftmost->left_size += split->length;
-                leftmost->left_nl_cnt += split->nl_cnt;
-                leftmost = leftmost->left;
+                da_append(ls, pt->added.size + i + 1);
+                new->nl_cnt++;
             }
-            leftmost->left = split;
-            leftmost->left_size = split->length;
-            leftmost->left_nl_cnt = split->nl_cnt;
-            split->parent = leftmost;
-        }
-        fix_insert(pt, split);
 
-        if(node->right == SENTINEL) 
-        {
-            node->right = new;
-            new->parent = node;
-            bubble_meta_changes(pt, node, pt->root, new->length, new->nl_cnt);
-        }
-        else
-        {
-            PTNode* leftmost = left_test(node->right);
-            leftmost->left = new;
-            new->parent = leftmost;
-            bubble_meta_changes(pt, new, pt->root, new->length, new->nl_cnt);
-        }
-        fix_insert(pt, new);
+        da_append_arr(&pt->added, data, len);
     }
-    else if(!node->is_original && node->end.line == new->start.line && 
-            node->end.column == new->start.column) // Append to node
-    {
-        node->end = new->end;
-        node->length += count;
-        node->nl_cnt += new->nl_cnt;
-        bubble_meta_changes(pt, node, pt->root, count, new->nl_cnt);
-        free_node(pt, new);
-    }
-    else // Insert to the right of node
-    {
-        if(node->right == SENTINEL) 
-        {
-            node->right = new;
-            new->parent = node;
-            bubble_meta_changes(pt, node, pt->root, new->length, new->nl_cnt);
-        }
-        else
-        {
-            PTNode* leftmost = left_test(node->right);
-            leftmost->left = new;
-            new->parent = leftmost;
-            bubble_meta_changes(pt, new, pt->root, new->length, new->nl_cnt);
-        }
-        fix_insert(pt, new);
-    }
-    PT_VALIDATE(pt);
+    new->end.line = ls->size - 1;
+    new->end.column = pt->added.size - ls->data[ls->size - 1];
+    
+    pt->size += new->length;
+    pt->line_cnt += new->nl_cnt;
+    insert_node(pt, new, offset);
 }
 
 void piece_tree_delete(PieceTree* pt, size_t offset, size_t count)
@@ -629,6 +572,106 @@ size_t piece_tree_node_id(const PieceTree* pt, const PTNode* node)
     return node_id(pt, node);
 }
 
+static void insert_node(PieceTree* pt, PTNode* new, size_t offset)
+{
+    PTNode* node;
+    size_t  node_start_offset;
+
+    if(pt->root == SENTINEL)
+    {
+        pt->root = new;
+        pt->root->is_black = true;
+        PT_VALIDATE(pt);
+        return;
+    }
+
+    // The only case where we insert to the left of a node is
+    // when we are inserting at the very beginning of the document.
+    // This ensures we append as much as possible.
+    if(offset == 0) 
+    {
+        node = left_test(pt->root);
+        new->parent = node;
+        node->left = new;
+        bubble_meta_changes(pt, new, pt->root, new->length, new->nl_cnt);
+        fix_insert(pt, new);
+        PT_VALIDATE(pt);
+        return;
+    }
+
+    node = node_at_offset(pt, offset, &node_start_offset, true);
+
+    GEM_ASSERT(offset > node_start_offset);
+    if(node_start_offset + node->length > offset) // Split node
+    {
+        size_t node_new_len = offset - node_start_offset;
+        PTNode* split = split_node(pt, node, node_new_len, node->length - node_new_len);
+
+        if(node->right == SENTINEL) 
+        {
+            node->right = split;
+            split->parent = node;
+        }
+        else
+        {
+            PTNode* leftmost = node->right;
+            while(leftmost->left != SENTINEL)
+            {
+                leftmost->left_size += split->length;
+                leftmost->left_nl_cnt += split->nl_cnt;
+                leftmost = leftmost->left;
+            }
+            leftmost->left = split;
+            leftmost->left_size = split->length;
+            leftmost->left_nl_cnt = split->nl_cnt;
+            split->parent = leftmost;
+        }
+        fix_insert(pt, split);
+
+        if(node->right == SENTINEL) 
+        {
+            node->right = new;
+            new->parent = node;
+            bubble_meta_changes(pt, node, pt->root, new->length, new->nl_cnt);
+        }
+        else
+        {
+            PTNode* leftmost = left_test(node->right);
+            leftmost->left = new;
+            new->parent = leftmost;
+            bubble_meta_changes(pt, new, pt->root, new->length, new->nl_cnt);
+        }
+        fix_insert(pt, new);
+    }
+    else if(!node->is_original && node->end.line == new->start.line && 
+            node->end.column == new->start.column) // Append to node
+    {
+        node->end = new->end;
+        node->length += new->length;
+        node->nl_cnt += new->nl_cnt;
+        bubble_meta_changes(pt, node, pt->root, new->length, new->nl_cnt);
+        free_node(pt, new);
+    }
+    else // Insert to the right of node
+    {
+        if(node->right == SENTINEL) 
+        {
+            node->right = new;
+            new->parent = node;
+            bubble_meta_changes(pt, node, pt->root, new->length, new->nl_cnt);
+        }
+        else
+        {
+            PTNode* leftmost = left_test(node->right);
+            leftmost->left = new;
+            new->parent = leftmost;
+            bubble_meta_changes(pt, new, pt->root, new->length, new->nl_cnt);
+        }
+        fix_insert(pt, new);
+    }
+    PT_VALIDATE(pt);
+}
+
 static PTNode* split_node(PieceTree* pt, PTNode* node, size_t left_size, size_t right_size)
 {
     GEM_ASSERT(is_valid_node(pt, node));
@@ -933,7 +976,7 @@ static PTNode* create_node_and_append(PieceTree* pt, const char* str, size_t len
     for(size_t i = 0; i < len; ++i)
         if(str[i] == '\n')
         {
-            da_append(&pt->added.line_starts, pt->added.size + i + 1);
+            da_append(ls, pt->added.size + i + 1);
             result->nl_cnt++;
         }
 
@@ -1088,7 +1131,6 @@ static void expand_node_storage(PieceTree* pt, size_t increase)
         return;
 
     uintptr_t prev_pointer = (uintptr_t)s->nodes;
-    size_t prev_cap = s->capacity;
     size_t new_cap = s->capacity + increase;
     new_cap += new_cap >> 1;
 
@@ -1099,9 +1141,9 @@ static void expand_node_storage(PieceTree* pt, size_t increase)
     {
         uintptr_t delta = new_pointer - prev_pointer;
         fix_pointer(&pt->root, delta);
-        for(NodeIntern* intern = s->nodes; intern < s->nodes + prev_cap; intern++)
+        for(NodeIntern* intern = s->nodes; intern < s->nodes + s->capacity; intern++)
         {
-            if(intern->next >= prev_cap)
+            if(intern->next >= s->capacity)
             {
                 fix_pointer(&intern->node.left, delta);
                 fix_pointer(&intern->node.right, delta);
@@ -1109,8 +1151,10 @@ static void expand_node_storage(PieceTree* pt, size_t increase)
             }
         }
     }
-    s->capacity = new_cap;
-    mark_free(pt, prev_cap);
+    s->capacity ^= new_cap;
+    new_cap ^= s->capacity;
+    s->capacity ^= new_cap;
+    mark_free(pt, new_cap);
 }
 
 static inline void mark_free(PieceTree* pt, size_t start)

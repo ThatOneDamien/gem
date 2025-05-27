@@ -84,7 +84,8 @@ struct PieceTree
 
 void piece_tree_init(PieceTree* pt, const char* original_src, size_t size, bool copy);
 void piece_tree_free(PieceTree* pt);
-void piece_tree_insert(PieceTree* pt, const char* data, size_t count, size_t offset);
+void piece_tree_insert(PieceTree* pt, const char* data, size_t len, size_t offset);
+void piece_tree_insert_repeat(PieceTree* pt, const char* data, size_t len, size_t rep_count, size_t offset);
 void piece_tree_delete(PieceTree* pt, size_t offset, size_t count);
 
 const PTNode* piece_tree_node_at(const PieceTree* pt, size_t offset, size_t* node_start_offset);

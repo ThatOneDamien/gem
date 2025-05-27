@@ -164,7 +164,7 @@ void bufwin_set_cursor(BufferWin* bufwin, int64_t line, int64_t column)
     GEM_ASSERT(bufwin != NULL);
     
     Cursor* c = &bufwin->cursor;
-    const PieceTree* pt = buffer_get_pt(bufwin->bufnr);
+    const PieceTree* pt = &buffer_get(bufwin->bufnr)->contents;
     size_t line_len;
 
     clamp_val(&line, 0, pt->line_cnt - 1);
@@ -187,7 +187,7 @@ void bufwin_move_cursor_line(BufferWin* bufwin, int64_t line_delta)
     if(line_delta == 0)
         return;
 
-    const PieceTree* pt = buffer_get_pt(bufwin->bufnr);
+    const PieceTree* pt = &buffer_get(bufwin->bufnr)->contents;
     Cursor* c = &bufwin->cursor;
     clamp_val(&line_delta, -c->pos.line, pt->line_cnt - 1 - c->pos.line);
     if(line_delta != 0)
@@ -209,7 +209,7 @@ void bufwin_move_cursor_horiz(BufferWin* bufwin, int64_t horiz_delta)
     if(horiz_delta == 0)
         return;
 
-    const PieceTree* pt = buffer_get_pt(bufwin->bufnr);
+    const PieceTree* pt = &buffer_get(bufwin->bufnr)->contents;
     Cursor* c = &bufwin->cursor;
     clamp_val(&horiz_delta, -c->offset, pt->size - c->offset);
     c->offset += horiz_delta;
@@ -228,7 +228,7 @@ void bufwin_cursor_refresh(BufferWin* bufwin)
 {
     GEM_ASSERT(bufwin != NULL);
     Cursor* c = &bufwin->cursor;
-    const PieceTree* pt = buffer_get_pt(bufwin->bufnr);
+    const PieceTree* pt = &buffer_get(bufwin->bufnr)->contents;
     c->pos = vis_to_actual(bufwin, c->vis);
     c->offset = piece_tree_get_offset_bp(pt, c->pos);
 }
@@ -237,7 +237,7 @@ void bufwin_set_view(BufferWin* bufwin, int64_t start_line, int64_t start_col)
 {
     (void)start_col;
     GEM_ASSERT(bufwin != NULL);
-    const PieceTree* pt = buffer_get_pt(bufwin->bufnr);
+    const PieceTree* pt = &buffer_get(bufwin->bufnr)->contents;
     clamp_val(&start_line, 0, pt->line_cnt - 1);
     if(start_col < 0)
         start_col = 0;
@@ -315,7 +315,8 @@ void bufwin_update_screen(int width, int height)
 
 void bufwin_key_press(uint16_t keycode, uint32_t mods)
 {
-    PieceTree* pt = (PieceTree*)buffer_get_pt(s_CurrentWindow->bufnr);
+    BufNr bufnr = s_CurrentWindow->bufnr;
+    PieceTree* pt = &buffer_get(bufnr)->contents; 
     static const char SHIFT_CONVERSION[] = 
         " \0\0\0\0\0\0\"\0\0\0\0<_>?)!@#$%^&*(\0:\0+"
         "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
@@ -335,10 +336,7 @@ void bufwin_key_press(uint16_t keycode, uint32_t mods)
         }
         else if(keycode == GEM_KEY_S)
         {
-            if(write_buffer(s_CurrentWindow->bufnr))
-                printf("Wrote %lu bytes to %s\n", pt->size, buffer_get_path(s_CurrentWindow->bufnr));
-            else
-                printf("Failed to write to %s\n", buffer_get_path(s_CurrentWindow->bufnr));
+            save_buffer(bufnr);
         }
         else if(keycode == GEM_KEY_D && mods & GEM_MOD_SHIFT && pt->size > 0)
         {
@@ -371,26 +369,27 @@ void bufwin_key_press(uint16_t keycode, uint32_t mods)
         char c = mods & GEM_MOD_SHIFT ? 
                     SHIFT_CONVERSION[keycode - GEM_KEY_SPACE] : 
                     (char)keycode;
-        piece_tree_insert_char(pt, c, s_CurrentWindow->cursor.offset);
+        buffer_insert(bufnr, &c, 1, s_CurrentWindow->cursor.offset);
         bufwin_move_cursor_horiz(s_CurrentWindow, 1);
         gem_request_redraw();
     }
     else if(keycode == GEM_KEY_ENTER)
     {
-        piece_tree_insert_char(pt, '\n', s_CurrentWindow->cursor.offset);
+        char c = '\n';
+        buffer_insert(bufnr, &c, 1, s_CurrentWindow->cursor.offset);
         bufwin_set_cursor(s_CurrentWindow, s_CurrentWindow->cursor.pos.line + 1, 0);
         gem_request_redraw();
     }
     else if(keycode == GEM_KEY_TAB)
     {
-        char spaces[] = "    ";
+        char c = ' ';
         int count = 4 - s_CurrentWindow->cursor.vis.column % 4;
-        piece_tree_insert(pt, spaces, count, s_CurrentWindow->cursor.offset);
+        buffer_insert_repeat(bufnr, &c, 1, count, s_CurrentWindow->cursor.offset);
         bufwin_move_cursor_horiz(s_CurrentWindow, count);
     }
     else if(keycode == GEM_KEY_BACKSPACE && s_CurrentWindow->cursor.offset > 0)
     {
-        int64_t max = (s_CurrentWindow->cursor.vis.column - 1) % 4 + 1;
+        int64_t max = (s_CurrentWindow->cursor.vis.column + 3) % 4 + 1;
         int64_t cnt = 0;
         size_t node_start;
         const PTNode* node = piece_tree_node_at(pt, s_CurrentWindow->cursor.offset - 1, &node_start);
@@ -415,7 +414,7 @@ void bufwin_key_press(uint16_t keycode, uint32_t mods)
         if(cnt == 0)
             cnt++;
 
-        piece_tree_delete(pt, s_CurrentWindow->cursor.offset - cnt, cnt);
+        buffer_delete(bufnr, s_CurrentWindow->cursor.offset - cnt, cnt);
         bufwin_move_cursor_horiz(s_CurrentWindow, -cnt);
     }
     else if(keycode == GEM_KEY_RIGHT)
@@ -530,7 +529,7 @@ static void update_frame(WinFrame* frame, GemQuad* cur)
 
 static BufferPos actual_to_vis(const BufferWin* bufwin, BufferPos actual)
 {
-    const PieceTree* pt = buffer_get_pt(bufwin->bufnr);
+    const PieceTree* pt = &buffer_get(bufwin->bufnr)->contents;
     BufferPos res;
     res.line = actual.line; // If I add line wrapping this can change
     res.column = 0;
@@ -561,7 +560,7 @@ static BufferPos actual_to_vis(const BufferWin* bufwin, BufferPos actual)
 
 static BufferPos vis_to_actual(const BufferWin* bufwin, BufferPos vis)
 {
-    const PieceTree* pt = buffer_get_pt(bufwin->bufnr);
+    const PieceTree* pt = &buffer_get(bufwin->bufnr)->contents;
     BufferPos res;
     res.line = vis.line; // If we add line wrapping this can change
     res.column = 0;
