@@ -7,7 +7,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define UNUSED __attribute__((unused))
 
 #ifdef GEM_DEBUG
     #include <signal.h>
@@ -75,6 +74,8 @@
 
 #ifdef __GNUC__
     #define alignas(alignment) __attribute__((packed,aligned(alignment)))
+    #define UNUSED __attribute__((unused))
 #else
     #define alignas(alignment) 
+    #define UNUSED
 #endif

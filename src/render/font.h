@@ -11,6 +11,8 @@
 #define GEM_GLYPH_CNT             (GEM_PRINTABLE_ASCII_END - GEM_PRINTABLE_ASCII_START + 1)
 
 typedef struct GemGlyphData GemGlyphData;
+typedef struct GemFont      GemFont;
+
 struct GemGlyphData
 {
     float    tex_coords[4];
@@ -20,7 +22,6 @@ struct GemGlyphData
 
 // TODO: Add support for unicode characters, and on-demand
 //       glyph loading into a dynamic atlas.
-typedef struct GemFont GemFont;
 struct GemFont
 {
     GemGlyphData glyphs[GEM_GLYPH_CNT];

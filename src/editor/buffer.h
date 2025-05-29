@@ -3,8 +3,8 @@
 #include "structs/quad.h"
 
 typedef int BufNr;
-
 typedef struct Buffer Buffer;
+
 struct Buffer
 {
     PieceTree contents;

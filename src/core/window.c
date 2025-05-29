@@ -13,7 +13,27 @@
 
 #include <string.h>
 
+#define REPEAT_INTERVAL 300
+
 typedef GLXContext (*glXCreateContextAttribsARBProc)(Display*, GLXFBConfig, GLXContext, Bool, const int*);
+typedef struct MouseState MouseState;
+typedef struct GemWindow  GemWindow;
+
+struct MouseState
+{
+    uint32_t mouse_code;
+    Time     last_time;
+    int      count_in_seq;
+};
+
+struct GemWindow
+{
+    Window handle;
+    int    width;
+    int    height;
+    bool   focused;
+};
+
 static bool extension_supported(const char* extension);
 static GLXFBConfig get_best_config(void);
 static void set_keymap(void);
@@ -24,22 +44,21 @@ extern void bufwin_update_screen(int width, int height);
 /*
  * Static variables relating to the window.
  */
-static Display* s_Display;
+static Display*   s_Display;
+static int        s_Screen;
 static GLXContext s_GLContext;
-static Atom s_DeleteWindowAtom;
-static Atom s_StateAtom;
-static Atom s_FullscreenAtom;
-static Atom s_MaximizeHAtom;
-static Atom s_MaximizeVAtom;
-static int s_KeyMap[256];
-static int s_Screen;
-static struct
-{
-    Window handle;
-    int width;
-    int height;
-    bool focused;
-} s_Window;
+static GemWindow  s_Window;
+
+static Atom       s_DeleteWindowAtom;
+static Atom       s_StateAtom;
+static Atom       s_FullscreenAtom;
+static Atom       s_MaximizeHAtom;
+static Atom       s_MaximizeVAtom;
+
+static MouseState s_LastMouse;
+static int        s_KeyMap[256];
+
+
 static bool s_Initialized = false;
 
 void window_create(uint32_t width, uint32_t height)
@@ -195,7 +214,14 @@ void window_dispatch_events(void)
             break;
         }
         case ButtonPress: {
-            gem_mouse_press(ev.xbutton.button, ev.xbutton.state, ev.xbutton.x, ev.xbutton.y);
+            if(s_LastMouse.mouse_code == ev.xbutton.button && s_LastMouse.count_in_seq < 3 && 
+               s_LastMouse.last_time >= ev.xbutton.time - REPEAT_INTERVAL)
+                s_LastMouse.count_in_seq++;
+            else
+                s_LastMouse.count_in_seq = 1;
+            s_LastMouse.mouse_code = ev.xbutton.button;
+            s_LastMouse.last_time = ev.xbutton.time;
+            gem_mouse_press(ev.xbutton.button, ev.xbutton.state, s_LastMouse.count_in_seq, ev.xbutton.x, ev.xbutton.y);
             break;
         }
         case ButtonRelease: {

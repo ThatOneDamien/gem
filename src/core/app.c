@@ -32,13 +32,13 @@ void gem_init(char* file_to_open)
     renderer_init();
     bufwin_init_root_frame();
     buffer_list_init();
+    bufwin_open(file_to_open);
 
     int width, height;
     window_get_dims(&width, &height);
     set_projection(width, height);
     bufwin_update_screen(width, height);
 
-    bufwin_open(file_to_open);
     s_Redraw = false;
 }
 
@@ -46,12 +46,12 @@ void gem_run(void)
 {
     s_Redraw = true;
     s_PrintStats = false;
-    glClearColor(0.02f, 0.03f, 0.05f, 1.0f);
+    // glClearColor(0.02f, 0.03f, 0.05f, 1.0f);
     while(true)
     {
         if(s_Redraw)
         {
-            glClear(GL_COLOR_BUFFER_BIT);
+            // glClear(GL_COLOR_BUFFER_BIT);
             renderer_start_batch();
             bufwin_render_all();
             renderer_render_batch();
@@ -115,9 +115,9 @@ void gem_key_press(uint16_t keycode, uint32_t mods)
         bufwin_key_press(keycode, mods);
 }
 
-void gem_mouse_press(uint32_t button, uint32_t mods, int x, int y)
+void gem_mouse_press(uint32_t button, uint32_t mods, int sequence, int x, int y)
 {
-    bufwin_mouse_press(button, mods, x, y);
+    bufwin_mouse_press(button, mods, sequence, x, y);
 }
 
 void gem_request_redraw(void)

@@ -2,8 +2,8 @@
 
 ## High Priority
 - Add file manager of some sorts to naviagate files on disk
+- Add status bar and command line like vim
 - Make editor nodal
-- Add command line like vim
 - Add selection capability
 - Add mouse support
 - Add copy/paste

@@ -4,14 +4,22 @@
 #include <stdbool.h>
 #include <string.h>
 
-typedef struct BufferPos BufferPos;
+typedef struct BufferPos      BufferPos;
+typedef struct PTNode         PTNode;
+typedef struct __PTNodeIntern __PTNodeIntern;
+typedef struct PTStorage      PTStorage;
+typedef struct PTPosDA        PTPosDA;
+typedef struct PTOrigBuffer   PTOrigBuffer;
+typedef struct PTAddBuffer    PTAddBuffer;
+typedef struct PieceTree      PieceTree;
+
+
 struct BufferPos
 {
     int64_t line;
     int64_t column;
 };
 
-typedef struct PTNode PTNode;
 struct PTNode
 {
     BufferPos  start;
@@ -34,8 +42,6 @@ struct PTNode
 #endif
 };
 
-typedef struct __PTNodeIntern __PTNodeIntern;
-typedef struct PTStorage PTStorage;
 struct PTStorage
 {
     __PTNodeIntern* nodes;
@@ -45,7 +51,6 @@ struct PTStorage
     size_t free_count;
 };
 
-typedef struct PTPosDA PTPosDA;
 struct PTPosDA
 {
     size_t*  data;
@@ -53,7 +58,6 @@ struct PTPosDA
     size_t   size;
 };
 
-typedef struct PTOrigBuffer PTOrigBuffer;
 struct PTOrigBuffer
 {
     const char*   data;        /* Original buffer */
@@ -62,7 +66,6 @@ struct PTOrigBuffer
     size_t        line_cnt;    /* Number of lines in the buffer (will always be > 0) */
 };
 
-typedef struct PTAddBuffer PTAddBuffer;
 struct PTAddBuffer
 {
     char*   data;
@@ -71,7 +74,6 @@ struct PTAddBuffer
     PTPosDA line_starts;
 };
 
-typedef struct PieceTree PieceTree;
 struct PieceTree
 {
     PTAddBuffer  added;         /* Added buffer */
