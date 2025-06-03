@@ -10,3 +10,5 @@
 #endif
 
 char* resolve_path(const char* path);
+char* resolve_path_rel_to(const char* rel_path, const char* starting_dir);
+char* get_cwd_path(void);

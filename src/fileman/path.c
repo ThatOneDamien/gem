@@ -74,3 +74,15 @@ clean:
     free(buf);
     return NULL;
 }
+
+char* get_cwd_path(void)
+{
+    char* res = malloc(GEM_PATH_MAX);
+    GEM_ENSURE(res != NULL);
+    if(getcwd(res, GEM_PATH_MAX) == NULL)
+    {
+        free(res);
+        return NULL;
+    }
+    return res;
+}

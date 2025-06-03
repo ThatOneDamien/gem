@@ -95,12 +95,6 @@ void gem_key_press(uint16_t keycode, uint32_t mods)
             bufwin_split(~mods & GEM_MOD_SHIFT);
             s_Redraw = true;
         }
-        else if(keycode == GEM_KEY_O)
-        {
-            bufwin_open("README.md");
-            printf("Open Buffers: %d\n", open_buffer_count());
-            s_Redraw = true;
-        }
         else
             handeled = false;
     }

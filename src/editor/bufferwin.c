@@ -30,7 +30,9 @@ static WinFrame*  s_RootFrame;
 void bufwin_init_root_frame(void)
 {
     s_CurWin = calloc(1, sizeof(BufferWin));
+    GEM_ENSURE(s_CurWin != NULL);
     s_CurWin->text_padding = DEFAULT_PADDING;
+    s_CurWin->local_dir = get_cwd_path();
 
     s_RootFrame = &s_CurWin->frame;
     s_RootFrame->type = FRAME_TYPE_LEAF;
@@ -64,6 +66,7 @@ BufferWin* bufwin_copy(BufferWin* bufwin)
         strcpy(copy->local_dir, bufwin->local_dir);
     }
     copy->bufnr = bufwin->bufnr;
+    copy->mode = WIN_MODE_NORMAL;
     return copy;
 }
 
@@ -339,6 +342,11 @@ void bufwin_key_press(uint16_t keycode, uint32_t mods)
         {
             save_buffer(bufnr);
         }
+        else if(keycode == GEM_KEY_O)
+        {
+            s_CurWin->mode = s_CurWin->mode == WIN_MODE_NORMAL ? WIN_MODE_FILEMAN : WIN_MODE_NORMAL;
+            gem_request_redraw();
+        }
         else if(keycode == GEM_KEY_D && mods & GEM_MOD_SHIFT && pt->size > 0)
         {
             Cursor* c = &s_CurWin->cursor;
@@ -479,12 +487,6 @@ void bufwin_print_view(const BufferWin* bufwin)
     printf("View Information:\n");
     printf("  Start: %lu,%lu\n", v->start.line, v->start.column);
     printf("  Count: %lu lines, %lu columns\n", v->count.line, v->count.column);
-}
-
-const GemQuad* bufwin_get_bb(const BufferWin* bufwin)
-{
-    GEM_ASSERT(bufwin != NULL);
-    return &bufwin->frame.bounding_box;
 }
 
 static void render_frame(WinFrame* frame)

@@ -29,6 +29,12 @@ enum
     FRAME_TYPE_HSPLIT
 };
 
+enum
+{
+    WIN_MODE_NORMAL = 0,
+    WIN_MODE_FILEMAN,
+};
+
 struct WinFrame
 {
     WinFrame*  parent;
@@ -39,16 +45,20 @@ struct WinFrame
     bool       visible;
 };
 
+
 struct BufferWin
 {
     Cursor      cursor; // May extend to multiple cursors later
     View        view;
+
+    WinFrame    frame;
     GemQuad     line_num_bb;
     GemQuad     contents_bb;
     GemPadding  text_padding;
-    WinFrame    frame;
+
     char*       local_dir;
     int         bufnr; 
+    uint8_t     mode;
 };
 
 #define frame_win(f) ((BufferWin*)((uintptr_t)(f) - offsetof(BufferWin, frame)))
@@ -81,7 +91,6 @@ void bufwin_mouse_press(uint32_t button, uint32_t mods, int sequence, int x, int
 void bufwin_print_cursor_loc(const BufferWin* bufwin);
 void bufwin_print_view(const BufferWin* bufwin);
 
-const GemQuad*     bufwin_get_bb(const BufferWin* bufwin);
 static inline void bufwin_set_cursor_bp(BufferWin* bufwin, BufferPos pos)
 { 
     bufwin_set_cursor(bufwin, pos.line, pos.column);

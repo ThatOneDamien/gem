@@ -14,7 +14,7 @@ void main()
     o_Color = v_Color;
     if(v_Solid == 0.0f)
     {
-        float alpha = texture(u_Tex, v_TexCoords).r;
+        float alpha = pow(texture(u_Tex, v_TexCoords).r, 1.0f / 2.2f);
         o_Color.a *= alpha;
     }
 }

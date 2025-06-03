@@ -3,7 +3,6 @@
 #include <stdbool.h>
 
 typedef struct vec2pos vec2pos;
-typedef struct vec4color vec4color;
 typedef struct GemQuad GemQuad;
 typedef struct GemPadding GemPadding;
 
@@ -11,14 +10,6 @@ struct vec2pos
 {
     int x;
     int y;
-};
-
-struct vec4color
-{
-    float r;
-    float g;
-    float b;
-    float a;
 };
 
 struct GemQuad

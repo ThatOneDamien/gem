@@ -1,8 +1,9 @@
 #include "renderer.h"
-#include "core/core.h"
-#include "fileman/fileio.h"
 #include "font.h"
 #include "uniforms.h"
+#include "core/core.h"
+#include "fileman/fileio.h"
+#include "structs/color.h"
 
 #include <glad/glad.h>
 
@@ -37,10 +38,20 @@ static uint32_t s_QuadCnt; // Quad count of current batch
 static GemRenderStats s_Stats;
 static bool s_Initialized = false;
 
-static bool create_shader_program(const char* vert_path, const char* frag_path, GLuint* program_id);
-static void draw_quad(const GemQuad* quad, const float tex[4], vec4color color, bool is_solid);
-static void draw_char(char c, vec2pos pos, vec4color color);
+// Colors for rendering, this is temporary until this becomes a
+// configurable setting
+static vec4color s_TextColor;
+static vec4color s_BGColor;
+static vec4color s_SidebarColor;
+static vec4color s_InactiveColor;
+static vec4color s_CursorColor;
+
+static void draw_fileman(const BufferWin* bufwin);
+static void draw_cursor(const Cursor* cur, const View* view, vec2pos top_left);
 static void handle_str(const char* str, size_t count, const GemQuad* bounding_box, const View* view, BufferPos* pos);
+static void draw_char(char c, vec2pos pos, vec4color color);
+static void draw_quad(const GemQuad* quad, const float tex[4], vec4color color, bool is_solid);
+static bool create_shader_program(const char* vert_path, const char* frag_path, GLuint* program_id);
 
 #ifdef GEM_DEBUG
 static APIENTRY void debugCallbackFunc(GLenum, GLenum, GLuint, GLenum, GLsizei, const GLchar*,
@@ -57,8 +68,6 @@ void renderer_init(void)
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    glEnable(GL_FRAMEBUFFER_SRGB);
 
     glCreateVertexArrays(1, &s_VAO);
     glCreateBuffers(1, &s_VBO);
@@ -114,6 +123,12 @@ void renderer_init(void)
 
     uniforms_init();
 
+    s_TextColor     = hex_rgba_to_color(0xd2d2dfff);
+    s_BGColor       = hex_rgba_to_color(0x2d2d3dff);
+    s_SidebarColor  = hex_rgba_to_color(0x36364aff);
+    s_InactiveColor = hex_rgba_to_color(0x00000044); 
+    s_CursorColor   = hex_rgba_to_color(0xaaaaaaa0);
+
     GEM_ENSURE_ARGS(result, "Failed to create font at path %s.", DEFAULT_FONT);
     s_Initialized = true;
 }
@@ -163,20 +178,125 @@ static const GemGlyphData* get_glyph_data_from_font(const GemFont* font, char c)
     return font->glyphs[index].width == 0 ? &font->glyphs[0] : &font->glyphs[index];
 }
 
-static void draw_char(char c, vec2pos pos, vec4color color)
-{
-    const GemGlyphData* data = get_glyph_data_from_font(&s_Font, c);
-    pos.x += data->xoff;
-    pos.y += get_font_size() - data->yoff;
-    GemQuad char_quad = make_quad(pos.x,
-                                  pos.y + data->height,
-                                  pos.x + data->width, 
-                                  pos.y);
 
-    draw_quad(&char_quad, data->tex_coords, color, false);
+
+void renderer_draw_bufwin(const BufferWin* bufwin, bool active)
+{
+    GEM_ASSERT(bufwin != NULL);
+
+    const PieceTree* pt = &buffer_get(bufwin->bufnr)->contents;
+    const GemQuad* buf_bb = &bufwin->frame.bounding_box;
+    
+    // Draw background
+    draw_quad(buf_bb, NULL, s_BGColor, true);
+
+    if(bufwin->mode == WIN_MODE_FILEMAN)
+    {
+        draw_fileman(bufwin);
+    }
+    else
+    {
+        uint32_t num_pad = s_Font.advance / 4;
+
+        // Draw sidebar with line numbers
+        vec2pos   pen;
+        pen.y = bufwin->line_num_bb.tr.y + bufwin->text_padding.top;
+
+        float vert_advance = get_vert_advance();
+
+        draw_quad(&bufwin->line_num_bb, NULL, s_SidebarColor, true);
+        for(int64_t line = 0; line < bufwin->view.count.line; ++line)
+        {
+            size_t cpy = line + 1 + bufwin->view.start.line;
+            pen.x = bufwin->line_num_bb.tr.x - s_Font.advance - num_pad;
+            if(cpy > pt->line_cnt)
+                draw_char('~', pen, s_TextColor);
+            else
+            {
+                while(cpy > 0)
+                {
+                    draw_char('0' + cpy % 10, pen, s_TextColor);
+                    pen.x -= s_Font.advance;
+                    cpy /= 10;
+                }
+            }
+            pen.y += vert_advance;
+        }
+
+        // Draw actual text in buffer.
+        pen.x = bufwin->contents_bb.bl.x;
+        pen.y = bufwin->contents_bb.tr.y;
+
+        size_t node_offset;
+        BufferPos view_pos = { 0, -bufwin->view.start.column };
+        const char* buf;
+        const PTNode* node = piece_tree_node_at_line(pt, bufwin->view.start.line, &node_offset);
+
+        while(node != NULL)
+        {
+            buf = piece_tree_get_node_start(pt, node) + node_offset;
+            handle_str(buf, node->length - node_offset, &bufwin->contents_bb, &bufwin->view, &view_pos);
+            node_offset = 0;
+            node = piece_tree_next_inorder(pt, node);
+        }
+
+        pen.x = bufwin->contents_bb.bl.x;
+        pen.y = bufwin->contents_bb.tr.y;
+        draw_cursor(&bufwin->cursor, &bufwin->view, pen); 
+    }
+    if(!active)
+        draw_quad(buf_bb, NULL, s_InactiveColor, true);
 }
 
-static void UNUSED handle_str(const char* str, size_t count, const GemQuad* bounding_box, 
+const GemFont* gem_get_font(void)
+{
+    return &s_Font;
+}
+
+const GemRenderStats* renderer_get_stats(void)
+{
+    return &s_Stats;
+}
+
+static void draw_fileman(const BufferWin* bufwin)
+{
+    // TODO: Figure out how to store the directory entries for use in
+    //       the file manager. If there are too many entries it could 
+    //       easily be a problem.
+    (void)bufwin;
+    // const GemQuad* frame_bb = &bufwin->frame.bounding_box;
+    // GemQuad bb = make_quad(frame_bb->bl.x + s_Font.advance * 2,
+    //                        frame_bb->bl.y - bufwin->text_padding.bottom,
+    //                        frame_bb->tr.x - s_Font.advance * 2,
+    //                        frame_bb->tr.y + bufwin->text_padding.top);
+    //
+    // BufferPos pen = { 0, 0 };
+    // struct dirent de;
+}
+
+static void draw_cursor(const Cursor* cur, const View* view, vec2pos top_left)
+{
+    int64_t rel_line = cur->vis.line - view->start.line;
+    int64_t rel_col = cur->vis.column - view->start.column;
+    if(rel_line < 0 || rel_line >= view->count.line ||
+       rel_col < 0 || rel_col >= view->count.column)
+        return;
+
+
+    int vert_adv = get_vert_advance();
+    int hori_adv = s_Font.advance;
+    int x = top_left.x + rel_col * hori_adv;
+    int y = top_left.y + rel_line * vert_adv;
+    GemQuad cursor_quad = make_quad(x, 
+                                    y + vert_adv,
+                                    x + hori_adv, 
+                                    y);
+    draw_quad(&cursor_quad, NULL, s_CursorColor, true);
+}
+
+
+
+static void handle_str(const char* str, size_t count, const GemQuad* bounding_box, 
                        const View* view, BufferPos* pos)
 {
     int vert_adv = get_vert_advance();
@@ -201,115 +321,71 @@ static void UNUSED handle_str(const char* str, size_t count, const GemQuad* boun
                     bounding_box->bl.x + pos->column * hori_adv,
                     bounding_box->tr.y + pos->line * vert_adv
                 };
-                draw_char(c, loc, (vec4color){ 0.7f, 0.7f, 0.7f, 1.0f });
+                draw_char(c, loc, s_TextColor); 
             }
             pos->column++;
         }
     }
 }
 
-static void UNUSED draw_cursor(const Cursor* cur, const View* view, vec2pos top_left)
+static void draw_char(char c, vec2pos pos, vec4color color)
 {
-    int64_t rel_line = cur->vis.line - view->start.line;
-    int64_t rel_col = cur->vis.column - view->start.column;
-    if(rel_line < 0 || rel_line >= view->count.line ||
-       rel_col < 0 || rel_col >= view->count.column)
-        return;
+    const GemGlyphData* data = get_glyph_data_from_font(&s_Font, c);
+    pos.x += data->xoff;
+    pos.y += get_font_size() - data->yoff;
+    GemQuad char_quad = make_quad(pos.x,
+                                  pos.y + data->height,
+                                  pos.x + data->width, 
+                                  pos.y);
 
-
-    int vert_adv = get_vert_advance();
-    int hori_adv = s_Font.advance;
-    int x = top_left.x + rel_col * hori_adv;
-    int y = top_left.y + rel_line * vert_adv;
-    GemQuad cursor_quad = make_quad(x, 
-                                    y + vert_adv,
-                                    x + hori_adv, 
-                                    y);
-    draw_quad(&cursor_quad, NULL, (vec4color){1.0f, 1.0f, 1.0f, 0.4f}, true);
-
+    draw_quad(&char_quad, data->tex_coords, color, false);
 }
 
-void renderer_draw_bufwin(const BufferWin* bufwin, bool active)
+static void draw_quad(const GemQuad* quad, const float tex[4], vec4color color, bool is_solid)
 {
-    GEM_ASSERT(bufwin != NULL);
+    GEM_ASSERT(quad != NULL);
+    GEM_ASSERT(is_solid || tex != NULL);
+    if(s_QuadCnt == MAX_QUADS)
+        renderer_render_batch();
 
-    const PieceTree* pt = &buffer_get(bufwin->bufnr)->contents;
-    const GemQuad* buf_bb = bufwin_get_bb(bufwin);
-    
-    // Draw background
-    draw_quad(buf_bb, NULL, (vec4color){0.02f, 0.03f, 0.05f, 1.0f}, true);
+    float positions[8] = { 
+        quad->bl.x, quad->bl.y,
+        quad->tr.x, quad->bl.y,
+        quad->tr.x, quad->tr.y,
+        quad->bl.x, quad->tr.y
+    };
 
-    uint32_t num_pad = s_Font.advance / 4;
-    uint32_t line_num_width = pt->line_cnt < 1000 ? 4 : (log10((double)pt->line_cnt) + 2);
-    GemQuad line_sidebar = make_quad(buf_bb->bl.x,
-                                     buf_bb->bl.y + 1,
-                                     buf_bb->bl.x + s_Font.advance * line_num_width + num_pad * 2,
-                                     buf_bb->tr.y);
-
-    GemQuad text_bb = make_quad(line_sidebar.tr.x + bufwin->text_padding.left,
-                                buf_bb->bl.y - bufwin->text_padding.bottom,
-                                buf_bb->tr.x - bufwin->text_padding.right,
-                                buf_bb->tr.y + bufwin->text_padding.top);
-
-    // Draw sidebar with line numbers
-    vec2pos   pen;
-    vec4color text_color = { 0.7f, 0.7f, 0.7f, 1.0f };
-    vec4color sidebar_color = { 0.1f, 0.1f, 0.1f, 1.0f };
-    pen.y = line_sidebar.tr.y + bufwin->text_padding.top;
-
-    float vert_advance = get_vert_advance();
-
-    draw_quad(&line_sidebar, NULL, sidebar_color, true);
-    for(int64_t line = 0; line < bufwin->view.count.line; ++line)
+    float texc[8];
+    if(!is_solid)
     {
-        size_t cpy = line + 1 + bufwin->view.start.line;
-        pen.x = line_sidebar.tr.x - s_Font.advance - num_pad;
-        if(cpy > pt->line_cnt)
-            draw_char('~', pen, text_color);
-        else
+        texc[0] = tex[0];
+        texc[1] = tex[1];
+        texc[2] = tex[2];
+        texc[3] = tex[1];
+        texc[4] = tex[2];
+        texc[5] = tex[3];
+        texc[6] = tex[0];
+        texc[7] = tex[3];
+    }
+
+    for(size_t i = 0; i < 4; ++i)
+    {
+        s_VertexInsert[i].position[0] = positions[2 * i];
+        s_VertexInsert[i].position[1] = positions[2 * i + 1];
+        if(!is_solid)
         {
-            while(cpy > 0)
-            {
-                draw_char('0' + cpy % 10, pen, text_color);
-                pen.x -= s_Font.advance;
-                cpy /= 10;
-            }
+            s_VertexInsert[i].tex_coords[0] = texc[2 * i];
+            s_VertexInsert[i].tex_coords[1] = texc[2 * i + 1];
         }
-        pen.y += vert_advance;
+        s_VertexInsert[i].color.r = color.r;
+        s_VertexInsert[i].color.g = color.g;
+        s_VertexInsert[i].color.b = color.b;
+        s_VertexInsert[i].color.a = color.a;
+        s_VertexInsert[i].solid = (float)is_solid;
     }
 
-    // Draw actual text in buffer.
-    pen.x = text_bb.bl.x;
-    pen.y = text_bb.tr.y;
-
-    size_t node_offset;
-    BufferPos view_pos = { 0, -bufwin->view.start.column };
-    const char* buf;
-    const PTNode* node = piece_tree_node_at_line(pt, bufwin->view.start.line, &node_offset);
-
-    while(node != NULL)
-    {
-        buf = piece_tree_get_node_start(pt, node) + node_offset;
-        handle_str(buf, node->length - node_offset, &text_bb, &bufwin->view, &view_pos);
-        node_offset = 0;
-        node = piece_tree_next_inorder(pt, node);
-    }
-
-    pen.x = text_bb.bl.x;
-    pen.y = text_bb.tr.y;
-    draw_cursor(&bufwin->cursor, &bufwin->view, pen); 
-    if(!active)
-        draw_quad(buf_bb, NULL, (vec4color){0.0f, 0.0f, 0.0f, 0.4f}, true);
-}
-
-const GemFont* gem_get_font(void)
-{
-    return &s_Font;
-}
-
-const GemRenderStats* renderer_get_stats(void)
-{
-    return &s_Stats;
+    s_VertexInsert += 4;
+    s_QuadCnt++;
 }
 
 static bool create_shader_program(const char* vert_path, const char* frag_path, GLuint* program_id)
@@ -371,54 +447,6 @@ static bool create_shader_program(const char* vert_path, const char* frag_path, 
     *program_id = program;
     return true;
 }
-
-static void draw_quad(const GemQuad* quad, const float tex[4], vec4color color, bool is_solid)
-{
-    GEM_ASSERT(quad != NULL);
-    GEM_ASSERT(is_solid || tex != NULL);
-    if(s_QuadCnt == MAX_QUADS)
-        renderer_render_batch();
-
-    float positions[8] = { 
-        quad->bl.x, quad->bl.y,
-        quad->tr.x, quad->bl.y,
-        quad->tr.x, quad->tr.y,
-        quad->bl.x, quad->tr.y
-    };
-
-    float texc[8];
-    if(!is_solid)
-    {
-        texc[0] = tex[0];
-        texc[1] = tex[1];
-        texc[2] = tex[2];
-        texc[3] = tex[1];
-        texc[4] = tex[2];
-        texc[5] = tex[3];
-        texc[6] = tex[0];
-        texc[7] = tex[3];
-    }
-
-    for(size_t i = 0; i < 4; ++i)
-    {
-        s_VertexInsert[i].position[0] = positions[2 * i];
-        s_VertexInsert[i].position[1] = positions[2 * i + 1];
-        if(!is_solid)
-        {
-            s_VertexInsert[i].tex_coords[0] = texc[2 * i];
-            s_VertexInsert[i].tex_coords[1] = texc[2 * i + 1];
-        }
-        s_VertexInsert[i].color.r = color.r;
-        s_VertexInsert[i].color.g = color.g;
-        s_VertexInsert[i].color.b = color.b;
-        s_VertexInsert[i].color.a = color.a;
-        s_VertexInsert[i].solid = (float)is_solid;
-    }
-
-    s_VertexInsert += 4;
-    s_QuadCnt++;
-}
-
 
 #ifdef GEM_DEBUG
 static APIENTRY void debugCallbackFunc(UNUSED GLenum source, UNUSED GLenum type, UNUSED GLuint id,
