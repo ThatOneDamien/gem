@@ -1,10 +1,13 @@
 #define _POSIX_C_SOURCE 200809L
+#define _XOPEN_SOURCE   1
+#define _DEFAULT_SOURCE 1
 #include "path.h"
 #include "core/core.h"
 
 #include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
+#include <dirent.h>
 
 char* resolve_path(const char* path)
 {
@@ -86,3 +89,65 @@ char* get_cwd_path(void)
     }
     return res;
 }
+
+static inline char tolow(char c)
+{
+    return c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c;
+}
+
+static int dir_cmp(const void* ent1, const void* ent2)
+{
+    const DirEntry* e1 = (const DirEntry*)ent1;
+    const DirEntry* e2 = (const DirEntry*)ent2;
+    uint32_t type1 = e1->stats.st_mode & S_IFMT;
+    uint32_t type2 = e2->stats.st_mode & S_IFMT;
+    if((type1 == S_IFREG || type2 == S_IFREG) &&
+       (type1 != type2))
+        return (type1 == S_IFREG) - (type2 == S_IFREG);
+
+    const char* a = e1->name;
+    const char* b = e2->name;
+    while(*a && (tolow(*a) == tolow(*b)))
+    {
+        a++;
+        b++;
+    }
+    return tolow(*a) - tolow(*b);
+}
+
+void scan_bufwin_dir(BufferWin* bufwin)
+{
+    EntryDA* entries = &bufwin->dir_entries;
+    entries->size = 0;
+    int fd = open(bufwin->local_dir ? bufwin->local_dir : ".", O_RDONLY);
+    if(fd < 0)
+        return;
+
+    DIR* dir = fdopendir(fd);
+    if(dir == NULL)
+        return;
+
+    struct dirent* dire;
+    while((dire = readdir(dir)) != NULL)
+    {
+        da_reserve(entries, entries->size + 1);
+        DirEntry* e = entries->data + entries->size;
+        struct stat* s = &entries->data[entries->size].stats;
+
+        fstatat(fd, dire->d_name, s, 0);
+        uint32_t type = s->st_mode & S_IFMT;
+        if((dire->d_name[0] != '.' || dire->d_name[1] != '\0') &&
+           (type == S_IFREG || type == S_IFDIR))
+        {
+            int len = strlen(dire->d_name);
+            memcpy(e->name, dire->d_name, len + 1);
+            if(len > entries->largest_name)
+                entries->largest_name = len;
+            entries->size++;
+        }
+    }
+
+    qsort(entries->data, entries->size, sizeof(DirEntry), dir_cmp);
+    closedir(dir);
+}
+

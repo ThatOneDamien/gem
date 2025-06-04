@@ -17,9 +17,10 @@
 
 static void      render_frame(WinFrame* frame);
 static void      update_frame(WinFrame* frame, GemQuad* cur); //Temporary
-static BufferPos actual_to_vis(const BufferWin* bufwin, BufferPos actual);
-static BufferPos vis_to_actual(const BufferWin* bufwin, BufferPos vis);
+static BufferPos actual_to_vis(const PieceTree* pt, BufferPos actual);
+static BufferPos vis_to_actual(const PieceTree* pt, BufferPos vis);
 static void      clamp_val(int64_t* val, int64_t min, int64_t max);
+static void      bufwin_free(BufferWin* bufwin);
 
 static WinFrame* left_test(WinFrame* start);
 
@@ -33,6 +34,7 @@ void bufwin_init_root_frame(void)
     GEM_ENSURE(s_CurWin != NULL);
     s_CurWin->text_padding = DEFAULT_PADDING;
     s_CurWin->local_dir = get_cwd_path();
+    da_init(&s_CurWin->dir_entries, 0);
 
     s_RootFrame = &s_CurWin->frame;
     s_RootFrame->type = FRAME_TYPE_LEAF;
@@ -65,6 +67,7 @@ BufferWin* bufwin_copy(BufferWin* bufwin)
         copy->local_dir = malloc(GEM_PATH_MAX);
         strcpy(copy->local_dir, bufwin->local_dir);
     }
+    da_init(&copy->dir_entries, 0);
     copy->bufnr = bufwin->bufnr;
     copy->mode = WIN_MODE_NORMAL;
     return copy;
@@ -148,7 +151,7 @@ void bufwin_close(void)
 
     other->parent = parent->parent;
     update_frame(other, &parent->bounding_box);
-    free(s_CurWin);
+    bufwin_free(s_CurWin);
     free(parent);
 
     s_CurWin = frame_win(left_test(other));
@@ -173,7 +176,7 @@ void bufwin_set_cursor(BufferWin* bufwin, int64_t line, int64_t column)
         c->horiz = column;
     c->vis.line = line;
     c->vis.column = column;
-    c->pos = vis_to_actual(bufwin, c->vis);
+    c->pos = vis_to_actual(pt, c->vis);
     c->offset = piece_tree_get_offset_bp(pt, c->pos);
 }
 
@@ -190,8 +193,8 @@ void bufwin_move_cursor_line(BufferWin* bufwin, int64_t line_delta)
     {
         c->vis.line += line_delta;
         c->vis.column = piece_tree_get_line_length(pt, c->vis.line);
-        c->vis.column = MIN(c->horiz, actual_to_vis(bufwin, c->vis).column);
-        c->pos = vis_to_actual(bufwin, c->vis);
+        c->vis.column = MIN(c->horiz, actual_to_vis(pt, c->vis).column);
+        c->pos = vis_to_actual(pt, c->vis);
         c->offset = piece_tree_get_offset_bp(pt, c->pos);
         bufwin_put_cursor_in_view(bufwin);
         if(bufwin->frame.visible)
@@ -212,7 +215,7 @@ void bufwin_move_cursor_horiz(BufferWin* bufwin, int64_t horiz_delta)
     if(horiz_delta != 0)
     {
         c->pos = piece_tree_get_buffer_pos(pt, c->offset);
-        c->vis = actual_to_vis(bufwin, c->pos);
+        c->vis = actual_to_vis(pt, c->pos);
         c->horiz = c->vis.column;
         bufwin_put_cursor_in_view(bufwin);
         if(bufwin->frame.visible)
@@ -225,7 +228,9 @@ void bufwin_cursor_refresh(BufferWin* bufwin)
     GEM_ASSERT(bufwin != NULL);
     Cursor* c = &bufwin->cursor;
     const PieceTree* pt = &buffer_get(bufwin->bufnr)->contents;
-    c->pos = vis_to_actual(bufwin, c->vis);
+    c->vis.column = piece_tree_get_line_length(pt, c->vis.line);
+    c->vis.column = MIN(c->horiz, actual_to_vis(pt, c->vis).column);
+    c->pos = vis_to_actual(pt, c->vis);
     c->offset = piece_tree_get_offset_bp(pt, c->pos);
 }
 
@@ -344,7 +349,15 @@ void bufwin_key_press(uint16_t keycode, uint32_t mods)
         }
         else if(keycode == GEM_KEY_O)
         {
-            s_CurWin->mode = s_CurWin->mode == WIN_MODE_NORMAL ? WIN_MODE_FILEMAN : WIN_MODE_NORMAL;
+            if(s_CurWin->mode != WIN_MODE_FILEMAN)
+            {
+                s_CurWin->mode = WIN_MODE_FILEMAN;
+                scan_bufwin_dir(s_CurWin);
+            }
+            else
+            {
+                s_CurWin->mode = WIN_MODE_NORMAL;
+            }
             gem_request_redraw();
         }
         else if(keycode == GEM_KEY_D && mods & GEM_MOD_SHIFT && pt->size > 0)
@@ -375,7 +388,7 @@ void bufwin_key_press(uint16_t keycode, uint32_t mods)
 
     if(keycode >= GEM_KEY_SPACE && keycode <= GEM_KEY_Z)
     {
-        char c = mods & GEM_MOD_SHIFT ? 
+        char c = (mods & GEM_MOD_SHIFT) || (keycode >= GEM_KEY_A && (mods & GEM_MOD_CAPS)) ? 
                     SHIFT_CONVERSION[keycode - GEM_KEY_SPACE] : 
                     (char)keycode;
         buffer_insert(bufnr, &c, 1, s_CurWin->cursor.offset);
@@ -431,9 +444,27 @@ void bufwin_key_press(uint16_t keycode, uint32_t mods)
     else if(keycode == GEM_KEY_LEFT)
         bufwin_move_cursor_horiz(s_CurWin, -1);
     else if(keycode == GEM_KEY_DOWN)
-        bufwin_move_cursor_line(s_CurWin, 1);
+    {
+        if(s_CurWin->mode == WIN_MODE_NORMAL)
+            bufwin_move_cursor_line(s_CurWin, 1);
+        else if(s_CurWin->mode == WIN_MODE_FILEMAN && 
+                s_CurWin->sel_entry < s_CurWin->dir_entries.size - 1)
+        {
+            s_CurWin->sel_entry++;
+            gem_request_redraw();
+        }
+    }
     else if(keycode == GEM_KEY_UP)
-        bufwin_move_cursor_line(s_CurWin, -1);
+    {
+        if(s_CurWin->mode == WIN_MODE_NORMAL)
+            bufwin_move_cursor_line(s_CurWin, -1);
+        else if(s_CurWin->mode == WIN_MODE_FILEMAN && 
+                s_CurWin->sel_entry > 0)
+        {
+            s_CurWin->sel_entry--;
+            gem_request_redraw();
+        }
+    }
 }
 
 void bufwin_mouse_press(uint32_t button, uint32_t mods, int sequence, int x, int y)
@@ -567,9 +598,8 @@ static void update_frame(WinFrame* frame, GemQuad* cur)
     update_frame(frame->right, &next);
 }
 
-static BufferPos actual_to_vis(const BufferWin* bufwin, BufferPos actual)
+static BufferPos actual_to_vis(const PieceTree* pt, BufferPos actual)
 {
-    const PieceTree* pt = &buffer_get(bufwin->bufnr)->contents;
     BufferPos res;
     res.line = actual.line; // If I add line wrapping this can change
     res.column = 0;
@@ -578,12 +608,12 @@ static BufferPos actual_to_vis(const BufferWin* bufwin, BufferPos actual)
     int64_t cur_off = 0;
     while(node != NULL && cur_off < actual.column)
     {
-        const char* bufwin = piece_tree_get_node_start(pt, node);
+        const char* buf = piece_tree_get_node_start(pt, node);
         for(size_t i = start; cur_off < actual.column && i < node->length; ++i)
         {
-            if(bufwin[i] == '\t')
+            if(buf[i] == '\t')
                 res.column += 4 - res.column % 4;
-            else if(bufwin[i] == '\n')
+            else if(buf[i] == '\n')
                 return res;
             else
                 res.column++;
@@ -598,9 +628,8 @@ static BufferPos actual_to_vis(const BufferWin* bufwin, BufferPos actual)
 
 }
 
-static BufferPos vis_to_actual(const BufferWin* bufwin, BufferPos vis)
+static BufferPos vis_to_actual(const PieceTree* pt, BufferPos vis)
 {
-    const PieceTree* pt = &buffer_get(bufwin->bufnr)->contents;
     BufferPos res;
     res.line = vis.line; // If we add line wrapping this can change
     res.column = 0;
@@ -609,12 +638,12 @@ static BufferPos vis_to_actual(const BufferWin* bufwin, BufferPos vis)
     int64_t cur_vis = 0;
     while(node != NULL && cur_vis < vis.column)
     {
-        const char* bufwin = piece_tree_get_node_start(pt, node);
+        const char* buf = piece_tree_get_node_start(pt, node);
         for(size_t i = start; cur_vis < vis.column && i < node->length; ++i)
         {
-            if(bufwin[i] == '\t')
+            if(buf[i] == '\t')
                 cur_vis += 4 - cur_vis % 4;
-            else if(bufwin[i] == '\n')
+            else if(buf[i] == '\n')
                 return res;
             else
                 cur_vis++;
@@ -636,6 +665,14 @@ static void clamp_val(int64_t* val, int64_t min, int64_t max)
     else if(*val > max)
         *val = max;
 }
+
+static void bufwin_free(BufferWin* bufwin)
+{
+    free(bufwin->local_dir);
+    da_free_data(&bufwin->dir_entries);
+    free(bufwin);
+}
+
 
 static WinFrame* left_test(WinFrame* start)
 {

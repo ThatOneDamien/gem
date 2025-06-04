@@ -1,12 +1,21 @@
 #pragma once
 #include "buffer.h"
+#include "structs/da.h"
 #include "structs/piecetree.h"
 #include "structs/quad.h"
+
+#include <limits.h>
+#include <sys/stat.h>
+#ifndef NAME_MAX
+    #define NAME_MAX 255
+#endif
 
 typedef struct Cursor    Cursor;
 typedef struct View      View;
 typedef struct WinFrame  WinFrame;
 typedef struct BufferWin BufferWin;
+typedef struct DirEntry  DirEntry;
+typedef struct EntryDA   EntryDA;
 
 struct Cursor
 {
@@ -45,6 +54,20 @@ struct WinFrame
     bool       visible;
 };
 
+struct DirEntry
+{
+    struct stat stats;
+    char        name[NAME_MAX + 1]; // +1 for null termination
+};
+
+struct EntryDA
+{
+    DirEntry* data;
+    size_t    size;
+    size_t    capacity;
+    int       largest_name;
+};
+
 
 struct BufferWin
 {
@@ -57,6 +80,9 @@ struct BufferWin
     GemPadding  text_padding;
 
     char*       local_dir;
+    EntryDA     dir_entries;
+    size_t      sel_entry;
+
     int         bufnr; 
     uint8_t     mode;
 };

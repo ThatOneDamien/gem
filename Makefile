@@ -1,6 +1,6 @@
 CC     ?= clang
 CFLAGS := -Wall -Wextra -Werror -pedantic -std=c99 $(shell pkg-config --cflags freetype2)
-LIBS   := $(shell pkg-config --static --libs freetype2) -lX11 -lGL
+LIBS   := $(shell pkg-config --static --libs freetype2) -lm -lX11 -lGL
 INC    = -Isrc -Idependencies/glad/include -Idependencies/stb_image
 
 BUILD_DIR ?= build

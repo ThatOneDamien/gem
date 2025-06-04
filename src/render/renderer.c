@@ -260,18 +260,45 @@ const GemRenderStats* renderer_get_stats(void)
 
 static void draw_fileman(const BufferWin* bufwin)
 {
-    // TODO: Figure out how to store the directory entries for use in
-    //       the file manager. If there are too many entries it could 
-    //       easily be a problem.
-    (void)bufwin;
-    // const GemQuad* frame_bb = &bufwin->frame.bounding_box;
-    // GemQuad bb = make_quad(frame_bb->bl.x + s_Font.advance * 2,
-    //                        frame_bb->bl.y - bufwin->text_padding.bottom,
-    //                        frame_bb->tr.x - s_Font.advance * 2,
-    //                        frame_bb->tr.y + bufwin->text_padding.top);
-    //
-    // BufferPos pen = { 0, 0 };
-    // struct dirent de;
+    if(bufwin->dir_entries.size == 0)
+        return;
+
+    const GemQuad* frame_bb = &bufwin->frame.bounding_box;
+    GemQuad bb = make_quad(frame_bb->bl.x + s_Font.advance * 2,
+                           frame_bb->bl.y - bufwin->text_padding.bottom,
+                           frame_bb->tr.x - s_Font.advance * 2,
+                           frame_bb->tr.y + bufwin->text_padding.top);
+
+    BufferPos pos = { 0, 0 };
+    uint32_t vert_adv = get_vert_advance();
+    uint32_t hori_adv = s_Font.advance;
+
+    for(size_t i = 0; i < bufwin->dir_entries.size; ++i)
+    {
+        DirEntry* e = bufwin->dir_entries.data + i;
+        size_t len = strlen(e->name);
+        handle_str(e->name, len, &bb, &bufwin->view, &pos);
+        if(i == bufwin->sel_entry)
+        {
+            GemQuad q = make_quad(bb.bl.x,
+                                  bb.tr.y + (i + 1) * vert_adv,
+                                  bb.bl.x + len * hori_adv,
+                                  bb.tr.y + i * vert_adv);
+            draw_quad(&q, NULL, s_CursorColor, true);
+        }
+        // pos.column = bufwin->dir_entries.largest_name + 2;
+        // switch(bufwin->dir_entries.ents[i]->d_type)
+        // {
+        // case 8:
+        //     handle_str("FILE", 4, &bb, &bufwin->view, &pos);
+        //     break;
+        // default:
+        //     handle_str("DIR", 3, &bb, &bufwin->view, &pos);
+        //     break;
+        // }
+        pos.line++;
+        pos.column = 0;
+    }
 }
 
 static void draw_cursor(const Cursor* cur, const View* view, vec2pos top_left)

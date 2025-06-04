@@ -19,12 +19,6 @@ static bool s_PrintStats;
 
 void gem_init(char* file_to_open)
 {
-    // Print welcome message (TEMPORARY)
-    printf("\n");
-    printf("-------------------------\n");
-    printf("|    Welcome to Gem!    |\n");
-    printf("-------------------------\n\n");
-
     // Create window, and initialize OpenGL context, renderer,
     // and freetype.
     window_create(GEM_INITIAL_WIDTH, GEM_INITIAL_HEIGHT);
