@@ -16,6 +16,8 @@ struct Buffer
     bool      open;
 };
 
+extern Buffer* g_cur_buf;
+
 void  buffer_list_init(void);
 
 BufNr buffer_open_empty(void);

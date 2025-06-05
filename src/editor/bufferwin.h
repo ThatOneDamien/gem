@@ -89,14 +89,14 @@ struct BufferWin
 
 #define frame_win(f) ((BufferWin*)((uintptr_t)(f) - offsetof(BufferWin, frame)))
 
+extern BufferWin* g_cur_win;
+
 void bufwin_init_root_frame(void);
 void bufwin_open(char* filepath);
 void bufwin_close(void);
 
 BufferWin* bufwin_copy(BufferWin* bufwin);
 BufferWin* bufwin_split(bool vsplit);
-BufNr      bufwin_get_bufnr(void);
-void       bufwin_set_current(BufferWin* bufwin);
 
 void bufwin_set_cursor(BufferWin* bufwin, int64_t line, int64_t column);
 void bufwin_move_cursor_line(BufferWin* bufwin, int64_t line_delta);

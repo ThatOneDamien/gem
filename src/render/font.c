@@ -32,18 +32,18 @@
 static const FT_Int32 LOAD_FLAGS = FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING;
 static const FT_Int32 RENDER_FLAGS = FT_RENDER_MODE_NORMAL;
 
-static FT_Library s_Library;
-static int s_FontSize = DEFAULT_FONT_SIZE; // For now only one font size is allowed globally
-static float s_LineHeight = DEFAULT_LINE_HEIGHT;
-static int s_VertAdvance = DEFAULT_VERT_ADV;
-static bool s_Initialized = false;
+static FT_Library s_lib;
+static float s_line_height = DEFAULT_LINE_HEIGHT;
+static int s_font_size = DEFAULT_FONT_SIZE; // For now only one font size is allowed globally
+static int s_vert_adv = DEFAULT_VERT_ADV;
+static bool s_initialized = false;
 
 void freetype_init(void)
 {
-    GEM_ASSERT(!s_Initialized);
-    FT_Error err = FT_Init_FreeType(&s_Library);
+    GEM_ASSERT(!s_initialized);
+    FT_Error err = FT_Init_FreeType(&s_lib);
     GEM_ENSURE_ARGS(err == FT_Err_Ok, "Freetype initialization failed (error code: %d).", err);
-    s_Initialized = true;
+    s_initialized = true;
 }
 
 static bool get_cell_dims(FT_Face face, size_t* width, size_t* height)
@@ -104,8 +104,8 @@ bool gen_font_atlas(const char* font_path, GemFont* font)
     memset(font, 0, sizeof(GemFont));
     FT_Face face;
     bool result = false;
-    CHECK_FT_OR_RET(FT_New_Face(s_Library, font_path, 0, &face), false);
-    CHECK_FT_OR_GOTO(FT_Set_Pixel_Sizes(face, s_FontSize, 0), clean);
+    CHECK_FT_OR_RET(FT_New_Face(s_lib, font_path, 0, &face), false);
+    CHECK_FT_OR_GOTO(FT_Set_Pixel_Sizes(face, s_font_size, 0), clean);
 
     size_t cell_width, cell_height;
     if(!get_cell_dims(face, &cell_width, &cell_height))
@@ -163,10 +163,10 @@ clean:
 
 void freetype_cleanup(void)
 {
-    if(s_Initialized)
+    if(s_initialized)
     {
-        s_Initialized = false;
-        FT_Error err = FT_Done_FreeType(s_Library);
+        s_initialized = false;
+        FT_Error err = FT_Done_FreeType(s_lib);
         if(err != FT_Err_Ok)
             exit(EXIT_FAILURE);
     }
@@ -174,30 +174,30 @@ void freetype_cleanup(void)
 
 int get_font_size(void)
 {
-    return s_FontSize;
+    return s_font_size;
 }
 
 float get_line_height(void)
 {
-    return s_LineHeight;
+    return s_line_height;
 }
 
 int get_vert_advance(void)
 {
-    return s_VertAdvance;
+    return s_vert_adv;
 }
 
 void set_font_size(size_t font_size)
 {
-    s_FontSize = font_size;
+    s_font_size = font_size;
     // This should also recreate the atlases with the new
     // font size, but in reality this is not a good way 
     // of doing this at all, so this is temporary.
-    s_VertAdvance = (int)((float)s_FontSize * s_LineHeight);
+    s_vert_adv = (int)((float)s_font_size * s_line_height);
 }
 
 void set_line_height(float line_height)
 {
-    s_LineHeight = line_height;
-    s_VertAdvance = (int)((float)s_FontSize * s_LineHeight);
+    s_line_height = line_height;
+    s_vert_adv = (int)((float)s_font_size * s_line_height);
 }

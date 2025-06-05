@@ -14,8 +14,8 @@
 #define GEM_INITIAL_WIDTH  1080
 #define GEM_INITIAL_HEIGHT 720
 
-static bool s_Redraw;
-static bool s_PrintStats;
+static bool s_redraw;
+static bool s_print_stats;
 
 void gem_init(char* file_to_open)
 {
@@ -33,29 +33,29 @@ void gem_init(char* file_to_open)
     set_projection(width, height);
     bufwin_update_screen(width, height);
 
-    s_Redraw = false;
+    s_redraw = false;
 }
 
 void gem_run(void)
 {
-    s_Redraw = true;
-    s_PrintStats = false;
+    s_redraw = true;
+    s_print_stats = false;
     // glClearColor(0.02f, 0.03f, 0.05f, 1.0f);
     while(true)
     {
-        if(s_Redraw)
+        if(s_redraw)
         {
             // glClear(GL_COLOR_BUFFER_BIT);
             renderer_start_batch();
             bufwin_render_all();
             renderer_render_batch();
-            if(s_PrintStats)
+            if(s_print_stats)
             {
                 const GemRenderStats* stats = renderer_get_stats();
                 printf("Draw Calls: %2u\tQuad Count: %u\n", stats->draw_calls, stats->quad_count);
             }
             window_swap();
-            s_Redraw = false;
+            s_redraw = false;
         }
         window_dispatch_events();
     }
@@ -76,18 +76,18 @@ void gem_key_press(uint16_t keycode, uint32_t mods)
     {
         if(keycode == GEM_KEY_P)
         {
-            s_PrintStats = !s_PrintStats;
-            printf("Printing stats turned %s.\n", s_PrintStats ? "on" : "off");
+            s_print_stats = !s_print_stats;
+            printf("Printing stats turned %s.\n", s_print_stats ? "on" : "off");
         }
         else if(keycode == GEM_KEY_C)
         {
             bufwin_close();
-            s_Redraw = true;
+            s_redraw = true;
         }
         else if(keycode == GEM_KEY_V)
         {
             bufwin_split(~mods & GEM_MOD_SHIFT);
-            s_Redraw = true;
+            s_redraw = true;
         }
         else
             handeled = false;
@@ -110,10 +110,10 @@ void gem_mouse_press(uint32_t button, uint32_t mods, int sequence, int x, int y)
 
 void gem_request_redraw(void)
 {
-    s_Redraw = true;
+    s_redraw = true;
 }
 
 bool gem_needs_redraw(void)
 {
-    return s_Redraw;
+    return s_redraw;
 }

@@ -25,8 +25,8 @@ struct GemGlyphData
 struct GemFont
 {
     GemGlyphData glyphs[GEM_GLYPH_CNT];
-    uint32_t advance; // TODO: Change this to be static for the whole program, as all bold and italic fonts should have the same advance
-    GLuint atlas_texture;
+    GLuint       atlas_texture;
+    int          advance; // TODO: Change this to be static for the whole program, as all bold and italic fonts should have the same advance
 };
 
 void  freetype_init(void);

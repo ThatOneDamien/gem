@@ -9,6 +9,7 @@
 
 #include <math.h>
 #include <string.h>
+#include <fcntl.h>
 
 #define MIN(x, y) ((x) > (y) ? (y) : (x))
 #define DEFAULT_PADDING ((GemPadding){ .left = 10, .right = 0, .top = 0, .bottom = 0 })
@@ -24,31 +25,31 @@ static void      bufwin_free(BufferWin* bufwin);
 
 static WinFrame* left_test(WinFrame* start);
 
-
-static BufferWin* s_CurWin;
-static WinFrame*  s_RootFrame;
+BufferWin* g_cur_win;
+static WinFrame*  s_root_frame;
 
 void bufwin_init_root_frame(void)
 {
-    s_CurWin = calloc(1, sizeof(BufferWin));
-    GEM_ENSURE(s_CurWin != NULL);
-    s_CurWin->text_padding = DEFAULT_PADDING;
-    s_CurWin->local_dir = get_cwd_path();
-    da_init(&s_CurWin->dir_entries, 0);
+    g_cur_win = calloc(1, sizeof(BufferWin));
+    GEM_ENSURE(g_cur_win != NULL);
+    g_cur_win->text_padding = DEFAULT_PADDING;
+    g_cur_win->local_dir = get_cwd_path();
+    da_init(&g_cur_win->dir_entries, 0);
 
-    s_RootFrame = &s_CurWin->frame;
-    s_RootFrame->type = FRAME_TYPE_LEAF;
+    s_root_frame = &g_cur_win->frame;
+    s_root_frame->type = FRAME_TYPE_LEAF;
 }
 
 void bufwin_open(char* filepath)
 {
-    GEM_ASSERT(s_CurWin != NULL);
-    s_CurWin->bufnr = filepath == NULL ?
+    GEM_ASSERT(g_cur_win != NULL);
+    g_cur_win->bufnr = filepath == NULL ?
                         buffer_open_empty() :
                         buffer_open_file(filepath);
-    if(s_CurWin->bufnr == -1)
-        s_CurWin->bufnr = buffer_open_empty();
-    bufwin_update_view(s_CurWin);
+    if(g_cur_win->bufnr == -1)
+        g_cur_win->bufnr = buffer_open_empty();
+    g_cur_buf = buffer_get(g_cur_win->bufnr);
+    bufwin_update_view(g_cur_win);
 }
 
 BufferWin* bufwin_copy(BufferWin* bufwin)
@@ -70,30 +71,31 @@ BufferWin* bufwin_copy(BufferWin* bufwin)
     da_init(&copy->dir_entries, 0);
     copy->bufnr = bufwin->bufnr;
     copy->mode = WIN_MODE_NORMAL;
+    copy->sel_entry = 0;
     return copy;
 }
 
 BufferWin* bufwin_split(bool vsplit)
 {
-    GEM_ASSERT(s_CurWin != NULL);
+    GEM_ASSERT(g_cur_win != NULL);
 
     BufferWin* new_win;
     WinFrame*  new_frame;
     WinFrame*  parent;
-    WinFrame*  frame = &s_CurWin->frame;
+    WinFrame*  frame = &g_cur_win->frame;
 
     if((vsplit  && frame->bounding_box.tr.x - frame->bounding_box.bl.x < MIN_WIN_WIDTH * 2) ||
        (!vsplit && frame->bounding_box.bl.y - frame->bounding_box.tr.y < MIN_WIN_HEIGHT * 2))
         return NULL;
 
     parent = malloc(sizeof(WinFrame));
-    new_win = bufwin_copy(s_CurWin);
+    new_win = bufwin_copy(g_cur_win);
     GEM_ENSURE(parent != NULL);
     GEM_ENSURE(new_win != NULL);
     new_frame = &new_win->frame;
 
-    if(frame == s_RootFrame)
-        s_RootFrame = parent;
+    if(frame == s_root_frame)
+        s_root_frame = parent;
     else if(frame == frame->parent->left)
         frame->parent->left = parent;
     else
@@ -115,26 +117,21 @@ BufferWin* bufwin_split(bool vsplit)
     return new_win;
 }
 
-BufNr bufwin_get_bufnr(void)
-{
-    return s_CurWin->bufnr;
-}
-
 void bufwin_set_current(BufferWin* bufwin)
 {
     GEM_ASSERT(bufwin != NULL);
-    s_CurWin = bufwin;
+    g_cur_win = bufwin;
 }
 
 void bufwin_close(void)
 {
-    GEM_ASSERT(s_CurWin != NULL);
-    if(&s_CurWin->frame == s_RootFrame)
+    GEM_ASSERT(g_cur_win != NULL);
+    if(&g_cur_win->frame == s_root_frame)
     {
         printf("Tried to delete root frame.\n");
         return;
     }
-    WinFrame* frame = &s_CurWin->frame;
+    WinFrame* frame = &g_cur_win->frame;
     WinFrame* parent = frame->parent;
     WinFrame* other;
     if(frame == parent->left)
@@ -142,8 +139,8 @@ void bufwin_close(void)
     else
         other = parent->left;
     
-    if(parent == s_RootFrame)
-        s_RootFrame = other;    
+    if(parent == s_root_frame)
+        s_root_frame = other;    
     else if(parent == parent->parent->left)
         parent->parent->left = other;
     else
@@ -151,10 +148,11 @@ void bufwin_close(void)
 
     other->parent = parent->parent;
     update_frame(other, &parent->bounding_box);
-    bufwin_free(s_CurWin);
+    bufwin_free(g_cur_win);
     free(parent);
 
-    s_CurWin = frame_win(left_test(other));
+    g_cur_win = frame_win(left_test(other));
+    g_cur_buf = buffer_get(g_cur_win->bufnr);
 }
 
 
@@ -178,6 +176,7 @@ void bufwin_set_cursor(BufferWin* bufwin, int64_t line, int64_t column)
     c->vis.column = column;
     c->pos = vis_to_actual(pt, c->vis);
     c->offset = piece_tree_get_offset_bp(pt, c->pos);
+    gem_request_redraw();
 }
 
 void bufwin_move_cursor_line(BufferWin* bufwin, int64_t line_delta)
@@ -295,7 +294,7 @@ void bufwin_update_view(BufferWin* bufwin)
                                     bb->bl.y,
                                     bb->bl.x + hori_adv * line_num_width + hori_adv / 2,
                                     bb->tr.y);
-
+    
     bufwin->contents_bb = make_quad(bufwin->line_num_bb.tr.x + tp->left,
                                     bb->bl.y - tp->bottom,
                                     bb->tr.x - tp->right,
@@ -311,159 +310,194 @@ void bufwin_update_view(BufferWin* bufwin)
 
 void bufwin_render_all(void)
 {
-    GEM_ASSERT(s_CurWin != NULL);
-    render_frame(s_RootFrame);
+    GEM_ASSERT(g_cur_win != NULL);
+    render_frame(s_root_frame);
 }
 
 
 void bufwin_update_screen(int width, int height)
 {
     GemQuad full_screen = make_quad(0, height, width, 0);
-    update_frame(s_RootFrame, &full_screen);
+    update_frame(s_root_frame, &full_screen);
 }
 
 void bufwin_key_press(uint16_t keycode, uint32_t mods)
 {
-    BufNr bufnr = s_CurWin->bufnr;
+    BufNr bufnr = g_cur_win->bufnr;
     PieceTree* pt = &buffer_get(bufnr)->contents; 
     static const char SHIFT_CONVERSION[] = 
         " \0\0\0\0\0\0\"\0\0\0\0<_>?)!@#$%^&*(\0:\0+"
         "\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
         "\0\0\0\0\0\0\0\0{|}\0\0~ABCDEFGHIJKLMNOPQR"
         "STUVWXYZ";
-    if(mods & GEM_MOD_CONTROL)
+
+    if(g_cur_win->mode == WIN_MODE_NORMAL)
     {
-        if(keycode == GEM_KEY_C)
+        if(mods & GEM_MOD_CONTROL)
         {
-            bufwin_print_cursor_loc(s_CurWin);
-            printf("\n");
-            bufwin_print_view(s_CurWin);
-        }
-        else if(keycode == GEM_KEY_T)
-        {
-            piece_tree_print_tree(pt);
-        }
-        else if(keycode == GEM_KEY_S)
-        {
-            save_buffer(bufnr);
-        }
-        else if(keycode == GEM_KEY_O)
-        {
-            if(s_CurWin->mode != WIN_MODE_FILEMAN)
+            if(keycode == GEM_KEY_C)
             {
-                s_CurWin->mode = WIN_MODE_FILEMAN;
-                scan_bufwin_dir(s_CurWin);
+                bufwin_print_cursor_loc(g_cur_win);
+                printf("\n");
+                bufwin_print_view(g_cur_win);
+            }
+            else if(keycode == GEM_KEY_T)
+            {
+                piece_tree_print_tree(pt);
+            }
+            else if(keycode == GEM_KEY_S)
+            {
+                save_buffer(bufnr);
+            }
+            else if(keycode == GEM_KEY_O)
+            {
+                g_cur_win->mode = WIN_MODE_FILEMAN;
+                scan_bufwin_dir(g_cur_win);
+                gem_request_redraw();
+            }
+            else if(keycode == GEM_KEY_D && mods & GEM_MOD_SHIFT && pt->size > 0)
+            {
+                Cursor* c = &g_cur_win->cursor;
+                size_t start = c->offset - c->pos.column;
+                size_t count = piece_tree_get_line_length(pt, c->pos.line) + 1;
+                bool go_down = false;
+                if(c->pos.line == (int64_t)pt->line_cnt - 1)
+                {
+                    if(c->pos.line == 0)
+                        count--;
+                    else
+                    {
+                        start--;
+                        go_down = true;
+                    }
+                }
+                piece_tree_delete(pt, start, count);
+                if(go_down)
+                    bufwin_move_cursor_line(g_cur_win, -1);
+                else
+                    bufwin_cursor_refresh(g_cur_win);
+                gem_request_redraw();
+            }
+            return;
+        }
+
+        if(keycode >= GEM_KEY_SPACE && keycode <= GEM_KEY_Z)
+        {
+            char c = (mods & GEM_MOD_SHIFT) || (keycode >= GEM_KEY_A && (mods & GEM_MOD_CAPS)) ? 
+                        SHIFT_CONVERSION[keycode - GEM_KEY_SPACE] : 
+                        (char)keycode;
+            buffer_insert(bufnr, &c, 1, g_cur_win->cursor.offset);
+            bufwin_move_cursor_horiz(g_cur_win, 1);
+            gem_request_redraw();
+        }
+        else if(keycode == GEM_KEY_ENTER)
+        {
+            char c = '\n';
+            buffer_insert(bufnr, &c, 1, g_cur_win->cursor.offset);
+            bufwin_set_cursor(g_cur_win, g_cur_win->cursor.pos.line + 1, 0);
+            gem_request_redraw();
+        }
+        else if(keycode == GEM_KEY_TAB)
+        {
+            char c = ' ';
+            int count = 4 - g_cur_win->cursor.vis.column % 4;
+            buffer_insert_repeat(bufnr, &c, 1, count, g_cur_win->cursor.offset);
+            bufwin_move_cursor_horiz(g_cur_win, count);
+        }
+        else if(keycode == GEM_KEY_BACKSPACE && g_cur_win->cursor.offset > 0)
+        {
+            int64_t max = (g_cur_win->cursor.vis.column + 3) % 4 + 1;
+            int64_t cnt = 0;
+            size_t node_start;
+            const PTNode* node = piece_tree_node_at(pt, g_cur_win->cursor.offset - 1, &node_start);
+            node_start = g_cur_win->cursor.offset - 1 - node_start;
+            while(node != NULL && max > 0)
+            {
+                const char* buf = piece_tree_get_node_start(pt, node);
+                for(size_t i = 0; i <= node_start && max > 0; ++i)
+                {
+                    if(buf[node_start - i] == ' ')
+                    {
+                        cnt++;
+                        max--;
+                    }
+                    else
+                        max = 0;
+                }
+                node = piece_tree_prev_inorder(pt, node);
+                if(node != NULL)
+                    node_start = node->length - 1;
+            }
+            if(cnt == 0)
+                cnt++;
+
+            buffer_delete(bufnr, g_cur_win->cursor.offset - cnt, cnt);
+            bufwin_move_cursor_horiz(g_cur_win, -cnt);
+        }
+        else if(keycode == GEM_KEY_RIGHT)
+            bufwin_move_cursor_horiz(g_cur_win, 1);
+        else if(keycode == GEM_KEY_LEFT)
+            bufwin_move_cursor_horiz(g_cur_win, -1);
+        else if(keycode == GEM_KEY_DOWN)
+        {
+            bufwin_move_cursor_line(g_cur_win, 1);
+        }
+        else if(keycode == GEM_KEY_UP)
+        {
+            bufwin_move_cursor_line(g_cur_win, -1);
+        }
+    }
+    else if(g_cur_win->mode == WIN_MODE_FILEMAN)
+    {
+        if(mods & GEM_MOD_CONTROL)
+        {
+            if(keycode == GEM_KEY_O)
+            {
+                g_cur_win->mode = WIN_MODE_NORMAL;
+                gem_request_redraw();
+            }
+            return;
+        }
+
+        if(keycode == GEM_KEY_DOWN && g_cur_win->sel_entry < g_cur_win->dir_entries.size - 1)
+        {
+            g_cur_win->sel_entry++;
+            gem_request_redraw();
+        }
+        else if(keycode == GEM_KEY_UP && g_cur_win->sel_entry > 0)
+        {
+            g_cur_win->sel_entry--;
+            gem_request_redraw();
+        }
+        else if(keycode == GEM_KEY_ENTER)
+        {
+            size_t len = strlen(g_cur_win->local_dir);
+            DirEntry* e = g_cur_win->dir_entries.data + g_cur_win->sel_entry;
+            g_cur_win->local_dir[len] = '/';
+            strcpy(g_cur_win->local_dir + len + 1, e->name);
+            char* resolved = resolve_path(g_cur_win->local_dir);
+            if(resolved == NULL)
+            {
+                g_cur_win->local_dir[len] = '\0';
+                return;
+            }
+            if(is_dir(e))
+            {
+                free(g_cur_win->local_dir);
+                g_cur_win->local_dir = resolved;
+                scan_bufwin_dir(g_cur_win);
+                g_cur_win->sel_entry = 0;
             }
             else
             {
-                s_CurWin->mode = WIN_MODE_NORMAL;
+                bufwin_open(resolved);
+                free(resolved);
+                g_cur_win->mode = WIN_MODE_NORMAL;
+                g_cur_win->local_dir[len] = '\0';
             }
             gem_request_redraw();
         }
-        else if(keycode == GEM_KEY_D && mods & GEM_MOD_SHIFT && pt->size > 0)
-        {
-            Cursor* c = &s_CurWin->cursor;
-            size_t start = c->offset - c->pos.column;
-            size_t count = piece_tree_get_line_length(pt, c->pos.line) + 1;
-            bool go_down = false;
-            if(c->pos.line == (int64_t)pt->line_cnt - 1)
-            {
-                if(c->pos.line == 0)
-                    count--;
-                else
-                {
-                    start--;
-                    go_down = true;
-                }
-            }
-            piece_tree_delete(pt, start, count);
-            if(go_down)
-                bufwin_move_cursor_line(s_CurWin, -1);
-            else
-                bufwin_cursor_refresh(s_CurWin);
-            gem_request_redraw();
-        }
-        return;
-    }
 
-    if(keycode >= GEM_KEY_SPACE && keycode <= GEM_KEY_Z)
-    {
-        char c = (mods & GEM_MOD_SHIFT) || (keycode >= GEM_KEY_A && (mods & GEM_MOD_CAPS)) ? 
-                    SHIFT_CONVERSION[keycode - GEM_KEY_SPACE] : 
-                    (char)keycode;
-        buffer_insert(bufnr, &c, 1, s_CurWin->cursor.offset);
-        bufwin_move_cursor_horiz(s_CurWin, 1);
-        gem_request_redraw();
-    }
-    else if(keycode == GEM_KEY_ENTER)
-    {
-        char c = '\n';
-        buffer_insert(bufnr, &c, 1, s_CurWin->cursor.offset);
-        bufwin_set_cursor(s_CurWin, s_CurWin->cursor.pos.line + 1, 0);
-        gem_request_redraw();
-    }
-    else if(keycode == GEM_KEY_TAB)
-    {
-        char c = ' ';
-        int count = 4 - s_CurWin->cursor.vis.column % 4;
-        buffer_insert_repeat(bufnr, &c, 1, count, s_CurWin->cursor.offset);
-        bufwin_move_cursor_horiz(s_CurWin, count);
-    }
-    else if(keycode == GEM_KEY_BACKSPACE && s_CurWin->cursor.offset > 0)
-    {
-        int64_t max = (s_CurWin->cursor.vis.column + 3) % 4 + 1;
-        int64_t cnt = 0;
-        size_t node_start;
-        const PTNode* node = piece_tree_node_at(pt, s_CurWin->cursor.offset - 1, &node_start);
-        node_start = s_CurWin->cursor.offset - 1 - node_start;
-        while(node != NULL && max > 0)
-        {
-            const char* buf = piece_tree_get_node_start(pt, node);
-            for(size_t i = 0; i <= node_start && max > 0; ++i)
-            {
-                if(buf[node_start - i] == ' ')
-                {
-                    cnt++;
-                    max--;
-                }
-                else
-                    max = 0;
-            }
-            node = piece_tree_prev_inorder(pt, node);
-            if(node != NULL)
-                node_start = node->length - 1;
-        }
-        if(cnt == 0)
-            cnt++;
-
-        buffer_delete(bufnr, s_CurWin->cursor.offset - cnt, cnt);
-        bufwin_move_cursor_horiz(s_CurWin, -cnt);
-    }
-    else if(keycode == GEM_KEY_RIGHT)
-        bufwin_move_cursor_horiz(s_CurWin, 1);
-    else if(keycode == GEM_KEY_LEFT)
-        bufwin_move_cursor_horiz(s_CurWin, -1);
-    else if(keycode == GEM_KEY_DOWN)
-    {
-        if(s_CurWin->mode == WIN_MODE_NORMAL)
-            bufwin_move_cursor_line(s_CurWin, 1);
-        else if(s_CurWin->mode == WIN_MODE_FILEMAN && 
-                s_CurWin->sel_entry < s_CurWin->dir_entries.size - 1)
-        {
-            s_CurWin->sel_entry++;
-            gem_request_redraw();
-        }
-    }
-    else if(keycode == GEM_KEY_UP)
-    {
-        if(s_CurWin->mode == WIN_MODE_NORMAL)
-            bufwin_move_cursor_line(s_CurWin, -1);
-        else if(s_CurWin->mode == WIN_MODE_FILEMAN && 
-                s_CurWin->sel_entry > 0)
-        {
-            s_CurWin->sel_entry--;
-            gem_request_redraw();
-        }
     }
 }
 
@@ -472,21 +506,23 @@ void bufwin_mouse_press(uint32_t button, uint32_t mods, int sequence, int x, int
     (void)mods;
     (void)sequence;
     if(button == GEM_MOUSE_SCROLL_DOWN)
-        bufwin_move_view(s_CurWin, 3);
+        bufwin_move_view(g_cur_win, 3);
     else if(button == GEM_MOUSE_SCROLL_UP)
-        bufwin_move_view(s_CurWin, -3);
+        bufwin_move_view(g_cur_win, -3);
     else if(button == GEM_MOUSE_BUTTON_LEFT)
     {
-        if(quad_contains(&s_CurWin->frame.bounding_box, x, y))
+        if(quad_contains(&g_cur_win->frame.bounding_box, x, y))
         {
-            if(sequence == 1) // Single click
-            {
-
-            }
+            BufferPos pos;
+            pos.line   = g_cur_win->view.start.line + (y - g_cur_win->contents_bb.tr.y) / get_vert_advance();
+            pos.column = g_cur_win->view.start.column + (x - g_cur_win->contents_bb.bl.x) / gem_get_font()->advance;
+            clamp_val(&pos.line, g_cur_win->view.start.line, g_cur_win->view.start.line + g_cur_win->view.count.line);
+            clamp_val(&pos.column, g_cur_win->view.start.column, g_cur_win->view.start.column + g_cur_win->view.count.column);
+            bufwin_set_cursor_bp(g_cur_win, pos);
         }
         else
         {
-            WinFrame* frame = s_RootFrame;
+            WinFrame* frame = s_root_frame;
             while(frame->type != FRAME_TYPE_LEAF)
             {
                 if(quad_contains(&frame->left->bounding_box, x, y))
@@ -494,10 +530,9 @@ void bufwin_mouse_press(uint32_t button, uint32_t mods, int sequence, int x, int
                 else
                     frame = frame->right;
             }
-            s_CurWin = frame_win(frame);
+            g_cur_win = frame_win(frame);
             gem_request_redraw();
         }
-        
     }
 }
 
@@ -528,7 +563,7 @@ static void render_frame(WinFrame* frame)
     if(frame->type == FRAME_TYPE_LEAF)
     {
         BufferWin* win = frame_win(frame);
-        renderer_draw_bufwin(win, win == s_CurWin);
+        renderer_draw_bufwin(win, win == g_cur_win);
     }
     else
     {
@@ -548,8 +583,8 @@ static void update_frame(WinFrame* frame, GemQuad* cur)
             update_frame(frame->left, NULL);
             update_frame(frame->right, NULL);
         }
-        else if(s_CurWin == frame_win(frame))
-            s_CurWin = frame_win(left_test(s_RootFrame));
+        else if(g_cur_win == frame_win(frame))
+            g_cur_win = frame_win(left_test(s_root_frame));
         return;
     }
     frame->visible = true;

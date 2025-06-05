@@ -44,19 +44,19 @@ extern void bufwin_update_screen(int width, int height);
 /*
  * Static variables relating to the window.
  */
-static Display*   s_Display;
-static int        s_Screen;
-static GLXContext s_GLContext;
-static GemWindow  s_Window;
+static Display*   s_display;
+static int        s_screen;
+static GLXContext s_gl_context;
+static GemWindow  s_window;
 
-static Atom       s_DeleteWindowAtom;
-static Atom       s_StateAtom;
-static Atom       s_FullscreenAtom;
-static Atom       s_MaximizeHAtom;
-static Atom       s_MaximizeVAtom;
+static Atom       s_del_win_atom;
+static Atom       s_state_atom;
+static Atom       s_fullscreen_atom;
+static Atom       s_maximizeh_atom;
+static Atom       s_maximizev_atom;
 
-static MouseState s_LastMouse;
-static int        s_KeyMap[256];
+static MouseState s_last_mouse;
+static int        s_keymap[256];
 
 
 static bool s_Initialized = false;
@@ -64,14 +64,14 @@ static bool s_Initialized = false;
 void window_create(uint32_t width, uint32_t height)
 {
     GEM_ASSERT(!s_Initialized);
-    s_Display = XOpenDisplay(NULL);
-    GEM_ENSURE(s_Display != NULL);
+    s_display = XOpenDisplay(NULL);
+    GEM_ENSURE(s_display != NULL);
 
-    s_Screen = DefaultScreen(s_Display);
+    s_screen = DefaultScreen(s_display);
 
     int glx_major = 0;
     int glx_minor = 0;
-    glXQueryVersion(s_Display, &glx_major, &glx_minor);
+    glXQueryVersion(s_display, &glx_major, &glx_minor);
     GEM_ENSURE_MSG(glx_major > 1 || glx_minor >= 2, "GLX 1.2 or greater is required.");
 
     GLXFBConfig fbconfig = get_best_config();
@@ -83,18 +83,18 @@ void window_create(uint32_t width, uint32_t height)
                             ButtonReleaseMask |
                             FocusChangeMask;
 
-    XVisualInfo* vi = glXGetVisualFromFBConfig(s_Display, fbconfig);
+    XVisualInfo* vi = glXGetVisualFromFBConfig(s_display, fbconfig);
     XSetWindowAttributes window_attribs = {
-        .border_pixel = BlackPixel(s_Display, s_Screen),
-        .background_pixel = BlackPixel(s_Display, s_Screen),
+        .border_pixel = BlackPixel(s_display, s_screen),
+        .background_pixel = BlackPixel(s_display, s_screen),
         .override_redirect = True,
-        .colormap = XCreateColormap(s_Display, RootWindow(s_Display, s_Screen), vi->visual, AllocNone),
+        .colormap = XCreateColormap(s_display, RootWindow(s_display, s_screen), vi->visual, AllocNone),
         .event_mask = event_mask
     };
     const unsigned long value_mask = CWBackPixel | CWColormap | CWBorderPixel | CWEventMask;
 
-    s_Window.handle = XCreateWindow(s_Display,                          // Display
-                                    RootWindow(s_Display, s_Screen),    // Parent Window
+    s_window.handle = XCreateWindow(s_display,                          // Display
+                                    RootWindow(s_display, s_screen),    // Parent Window
                                     0, 0,                               // Location
                                     width, height,                      // Width and Height
                                     1,                                  // Border Width
@@ -106,7 +106,7 @@ void window_create(uint32_t width, uint32_t height)
 
 
     XFree(vi);
-    XFreeColormap(s_Display, window_attribs.colormap);
+    XFreeColormap(s_display, window_attribs.colormap);
     glXCreateContextAttribsARBProc glXCreateContextAttribsARB = 
         (glXCreateContextAttribsARBProc)glXGetProcAddressARB((const GLubyte *)"glXCreateContextAttribsARB");
 
@@ -118,35 +118,35 @@ void window_create(uint32_t width, uint32_t height)
     };
 
     if(!extension_supported("GLX_ARB_create_context") || glXCreateContextAttribsARB == NULL)
-        s_GLContext = glXCreateNewContext(s_Display, fbconfig, GLX_RGBA_TYPE, 0, True);
+        s_gl_context = glXCreateNewContext(s_display, fbconfig, GLX_RGBA_TYPE, 0, True);
     else
-        s_GLContext = glXCreateContextAttribsARB(s_Display, fbconfig, 0, True, context_attribs);
-    XSync(s_Display, False);
+        s_gl_context = glXCreateContextAttribsARB(s_display, fbconfig, 0, True, context_attribs);
+    XSync(s_display, False);
 
-    glXMakeCurrent(s_Display, s_Window.handle, s_GLContext);
-    XClearWindow(s_Display, s_Window.handle);
-    XMapRaised(s_Display, s_Window.handle);
-    Xutf8SetWMProperties(s_Display, s_Window.handle, "Gem", "Gem", NULL, 0, NULL, NULL, NULL);
+    glXMakeCurrent(s_display, s_window.handle, s_gl_context);
+    XClearWindow(s_display, s_window.handle);
+    XMapRaised(s_display, s_window.handle);
+    Xutf8SetWMProperties(s_display, s_window.handle, "Gem", "Gem", NULL, 0, NULL, NULL, NULL);
 
-    s_DeleteWindowAtom = XInternAtom(s_Display, "WM_DELETE_WINDOW", True);
-    s_StateAtom = XInternAtom(s_Display, "_NET_WM_STATE", True);
-    s_FullscreenAtom = XInternAtom(s_Display, "_NET_WM_STATE_FULLSCREEN", True);
-    s_MaximizeHAtom = XInternAtom(s_Display, "_NET_WM_STATE_MAXIMIZED_HORZ", True);
-    s_MaximizeVAtom = XInternAtom(s_Display, "_NET_WM_STATE_MAXIMIZED_VERT", True);
-    XSetWMProtocols(s_Display, s_Window.handle, &s_DeleteWindowAtom, 1);
+    s_del_win_atom = XInternAtom(s_display, "WM_DELETE_WINDOW", True);
+    s_state_atom = XInternAtom(s_display, "_NET_WM_STATE", True);
+    s_fullscreen_atom = XInternAtom(s_display, "_NET_WM_STATE_FULLSCREEN", True);
+    s_maximizeh_atom = XInternAtom(s_display, "_NET_WM_STATE_MAXIMIZED_HORZ", True);
+    s_maximizev_atom = XInternAtom(s_display, "_NET_WM_STATE_MAXIMIZED_VERT", True);
+    XSetWMProtocols(s_display, s_window.handle, &s_del_win_atom, 1);
 
     XSizeHints sizeHints;
     sizeHints.flags = PMinSize;
     sizeHints.min_width = 400;
     sizeHints.min_height = 400;
-    XSetWMNormalHints(s_Display, s_Window.handle, &sizeHints);
+    XSetWMNormalHints(s_display, s_window.handle, &sizeHints);
 
     int version = gladLoadGLLoader((GLADloadproc)glXGetProcAddressARB);
     GEM_ENSURE_MSG(version != 0, "Failed to load OpenGL function pointers.");
 
-    s_Window.focused = true;
-    s_Window.width = width;
-    s_Window.height = height;
+    s_window.focused = true;
+    s_window.width = width;
+    s_window.height = height;
 
     set_keymap();
     s_Initialized = true;
@@ -157,21 +157,21 @@ void window_destroy(void)
     if(s_Initialized)
     {
         s_Initialized = false;
-        glXDestroyContext(s_Display, s_GLContext);
-        XDestroyWindow(s_Display, s_Window.handle);
-        XCloseDisplay(s_Display);
+        glXDestroyContext(s_display, s_gl_context);
+        XDestroyWindow(s_display, s_window.handle);
+        XCloseDisplay(s_display);
     }
 }
 
 void window_dispatch_events(void)
 {
-    int prev_width = s_Window.width;
-    int prev_height = s_Window.height;
+    int prev_width = s_window.width;
+    int prev_height = s_window.height;
     XEvent ev;
 
-    while(!s_Window.focused || !gem_needs_redraw() || XPending(s_Display))
+    while(!s_window.focused || !gem_needs_redraw() || XPending(s_display))
     {
-        XNextEvent(s_Display, &ev);
+        XNextEvent(s_display, &ev);
         unsigned int scancode = ev.xkey.keycode;
 
         int filtered = XFilterEvent(&ev, None);
@@ -180,11 +180,11 @@ void window_dispatch_events(void)
         {
         case FocusIn: {
             gem_request_redraw();
-            s_Window.focused = true;
+            s_window.focused = true;
             break;
         }
         case FocusOut: {
-            s_Window.focused = false;
+            s_window.focused = false;
             break;
         }
         case DestroyNotify: {
@@ -193,14 +193,14 @@ void window_dispatch_events(void)
         }
         case Expose: {
             gem_request_redraw();
-            s_Window.width = ev.xexpose.width;
-            s_Window.height = ev.xexpose.height;
+            s_window.width = ev.xexpose.width;
+            s_window.height = ev.xexpose.height;
             break;
         }
         case ClientMessage: {
             if(filtered)
                 return;
-            if((Atom)ev.xclient.data.l[0] == s_DeleteWindowAtom)
+            if((Atom)ev.xclient.data.l[0] == s_del_win_atom)
             {
                 gem_close(EXIT_SUCCESS);
                 return;
@@ -208,20 +208,20 @@ void window_dispatch_events(void)
             break;
         }
         case KeyPress: {
-            uint16_t keycode = s_KeyMap[scancode];
+            uint16_t keycode = s_keymap[scancode];
             if(keycode != GEM_KEY_NONE)
                 gem_key_press(keycode, ev.xkey.state);
             break;
         }
         case ButtonPress: {
-            if(s_LastMouse.mouse_code == ev.xbutton.button && s_LastMouse.count_in_seq < 3 && 
-               s_LastMouse.last_time >= ev.xbutton.time - REPEAT_INTERVAL)
-                s_LastMouse.count_in_seq++;
+            if(s_last_mouse.mouse_code == ev.xbutton.button && s_last_mouse.count_in_seq < 3 && 
+               s_last_mouse.last_time >= ev.xbutton.time - REPEAT_INTERVAL)
+                s_last_mouse.count_in_seq++;
             else
-                s_LastMouse.count_in_seq = 1;
-            s_LastMouse.mouse_code = ev.xbutton.button;
-            s_LastMouse.last_time = ev.xbutton.time;
-            gem_mouse_press(ev.xbutton.button, ev.xbutton.state, s_LastMouse.count_in_seq, ev.xbutton.x, ev.xbutton.y);
+                s_last_mouse.count_in_seq = 1;
+            s_last_mouse.mouse_code = ev.xbutton.button;
+            s_last_mouse.last_time = ev.xbutton.time;
+            gem_mouse_press(ev.xbutton.button, ev.xbutton.state, s_last_mouse.count_in_seq, ev.xbutton.x, ev.xbutton.y);
             break;
         }
         case ButtonRelease: {
@@ -230,60 +230,60 @@ void window_dispatch_events(void)
         }
     }
 
-    if(prev_width != s_Window.width || prev_height != s_Window.height)
+    if(prev_width != s_window.width || prev_height != s_window.height)
     {
-        set_projection(s_Window.width, s_Window.height);
-        bufwin_update_screen(s_Window.width, s_Window.height);
+        set_projection(s_window.width, s_window.height);
+        bufwin_update_screen(s_window.width, s_window.height);
     }
 }
 
 void window_swap(void)
 {
-    glXSwapBuffers(s_Display, s_Window.handle);
+    glXSwapBuffers(s_display, s_window.handle);
 }
 
 void window_get_dims(int* width, int* height)
 {
     GEM_ASSERT(width != NULL);
     GEM_ASSERT(height != NULL);
-    *width = s_Window.width;
-    *height = s_Window.height;
+    *width = s_window.width;
+    *height = s_window.height;
 }
 
 void window_toggle_fullscreen(void)
 {
     XEvent ev;
     ev.type = ClientMessage;
-    ev.xclient.window = s_Window.handle;
-    ev.xclient.message_type = s_StateAtom;
+    ev.xclient.window = s_window.handle;
+    ev.xclient.message_type = s_state_atom;
     ev.xclient.format = 32;
     ev.xclient.data.l[0] = 2;
-    ev.xclient.data.l[1] = s_FullscreenAtom;
+    ev.xclient.data.l[1] = s_fullscreen_atom;
     ev.xclient.data.l[2] = 0;
     ev.xclient.data.l[3] = 1;
     ev.xclient.data.l[4] = 0;
-    XSendEvent(s_Display, RootWindow(s_Display, s_Screen), False, ClientMessage, &ev);
+    XSendEvent(s_display, RootWindow(s_display, s_screen), False, ClientMessage, &ev);
 }
 
 void window_toggle_maximize(void)
 {
     XEvent ev;
     ev.type = ClientMessage;
-    ev.xclient.window = s_Window.handle;
-    ev.xclient.message_type = s_StateAtom;
+    ev.xclient.window = s_window.handle;
+    ev.xclient.message_type = s_state_atom;
     ev.xclient.format = 32;
     ev.xclient.data.l[0] = 2;
-    ev.xclient.data.l[1] = s_MaximizeHAtom;
-    ev.xclient.data.l[2] = s_MaximizeVAtom;
+    ev.xclient.data.l[1] = s_maximizeh_atom;
+    ev.xclient.data.l[2] = s_maximizev_atom;
     ev.xclient.data.l[3] = 1;
     ev.xclient.data.l[4] = 0;
-    XSendEvent(s_Display, RootWindow(s_Display, s_Screen), False, ClientMessage, &ev);
+    XSendEvent(s_display, RootWindow(s_display, s_screen), False, ClientMessage, &ev);
 
 }
 
 static bool extension_supported(const char* extension)
 {
-    const char* extensions = glXQueryExtensionsString(s_Display, s_Screen);
+    const char* extensions = glXQueryExtensionsString(s_display, s_screen);
     GEM_ENSURE(extensions != NULL);
 
     const char* ext_loc = extension;
@@ -323,7 +323,7 @@ static GLXFBConfig get_best_config(void)
     };
 
     int count;
-    GLXFBConfig* configs = glXChooseFBConfig(s_Display, s_Screen, glx_attribs, &count);
+    GLXFBConfig* configs = glXChooseFBConfig(s_display, s_screen, glx_attribs, &count);
     GEM_ENSURE_MSG(configs != 0 && count > 0, "Failed to retrieve matching framebuffer configuration.");
 
     bool arb_multisample = extension_supported("GLX_ARB_multisample");
@@ -334,13 +334,13 @@ static GLXFBConfig get_best_config(void)
     for(int i = 0; i < count; ++i)
     {
         GLXFBConfig cfg = configs[i];
-        XVisualInfo* vi = glXGetVisualFromFBConfig(s_Display, cfg);
+        XVisualInfo* vi = glXGetVisualFromFBConfig(s_display, cfg);
         if(vi == NULL)
             continue;
 
         int samples = 0;
         if(arb_multisample)
-            glXGetFBConfigAttrib(s_Display, cfg, GLX_SAMPLES, &samples);
+            glXGetFBConfigAttrib(s_display, cfg, GLX_SAMPLES, &samples);
         if(most_samples < samples)
         {
             most_samples = samples;
@@ -358,16 +358,16 @@ static void set_keymap(void)
     int majorOpcode, eventBase, errorBase;
     int major = 1;
     int minor = 0;
-    int supported = XkbQueryExtension(s_Display, &majorOpcode, &eventBase, &errorBase, &major, &minor);
+    int supported = XkbQueryExtension(s_display, &majorOpcode, &eventBase, &errorBase, &major, &minor);
     
     int scancodeMin, scancodeMax;
 
-    memset(s_KeyMap, -1, sizeof(s_KeyMap));
+    memset(s_keymap, -1, sizeof(s_keymap));
 
     if(supported)
     {
-        XkbDescPtr desc = XkbGetMap(s_Display, 0, XkbUseCoreKbd);
-        XkbGetNames(s_Display, XkbKeyNamesMask | XkbKeyAliasesMask, desc);
+        XkbDescPtr desc = XkbGetMap(s_display, 0, XkbUseCoreKbd);
+        XkbGetNames(s_display, XkbKeyNamesMask | XkbKeyAliasesMask, desc);
 
         scancodeMin = desc->min_key_code;
         scancodeMax = desc->max_key_code;
@@ -538,27 +538,27 @@ static void set_keymap(void)
                 }
             }
 
-            s_KeyMap[scancode] = key;
+            s_keymap[scancode] = key;
         }
 
         XkbFreeNames(desc, XkbKeyNamesMask, True);
         XkbFreeKeyboard(desc, 0, True);
     }
     else
-        XDisplayKeycodes(s_Display, &scancodeMin, &scancodeMax);
+        XDisplayKeycodes(s_display, &scancodeMin, &scancodeMax);
 
     int width;
-    KeySym* keysyms = XGetKeyboardMapping(s_Display,
+    KeySym* keysyms = XGetKeyboardMapping(s_display,
                                           scancodeMin,
                                           scancodeMax - scancodeMin + 1,
                                           &width);
 
     for (int scancode = scancodeMin; scancode <= scancodeMax; scancode++)
     {
-        if (s_KeyMap[scancode] < 0)
+        if (s_keymap[scancode] < 0)
         {
             const size_t base = (scancode - scancodeMin) * width;
-            s_KeyMap[scancode] = translate_keysym(&keysyms[base], width);
+            s_keymap[scancode] = translate_keysym(&keysyms[base], width);
         }
     }
 

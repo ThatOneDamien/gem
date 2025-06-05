@@ -27,24 +27,24 @@ struct QuadVertex
     float     solid;
 };
 
-static GLuint s_VAO;
-static GLuint s_VBO;
-static GLuint s_IBO;
-static GLuint s_Shader;
-static GemFont s_Font;
-static QuadVertex* s_VertexData;
-static QuadVertex* s_VertexInsert;
-static uint32_t s_QuadCnt; // Quad count of current batch
-static GemRenderStats s_Stats;
-static bool s_Initialized = false;
+static GLuint s_vao;
+static GLuint s_vbo;
+static GLuint s_ibo;
+static GLuint s_shader;
+static GemFont s_font;
+static QuadVertex* s_vertex_data;
+static QuadVertex* s_vertex_insert;
+static uint32_t s_quad_cnt; // Quad count of current batch
+static GemRenderStats s_stats;
+static bool s_initialized = false;
 
 // Colors for rendering, this is temporary until this becomes a
 // configurable setting
-static vec4color s_TextColor;
-static vec4color s_BGColor;
-static vec4color s_SidebarColor;
-static vec4color s_InactiveColor;
-static vec4color s_CursorColor;
+static vec4color s_text_color;
+static vec4color s_bg_color;
+static vec4color s_sidebar_color;
+static vec4color s_inactive_color;
+static vec4color s_cursor_color;
 
 static void draw_fileman(const BufferWin* bufwin);
 static void draw_cursor(const Cursor* cur, const View* view, vec2pos top_left);
@@ -60,7 +60,7 @@ static APIENTRY void debugCallbackFunc(GLenum, GLenum, GLuint, GLenum, GLsizei, 
 
 void renderer_init(void)
 {
-    GEM_ASSERT(!s_Initialized);
+    GEM_ASSERT(!s_initialized);
 #ifdef GEM_DEBUG
     glEnable(GL_DEBUG_OUTPUT);
     glDebugMessageCallback(debugCallbackFunc, NULL);
@@ -69,15 +69,15 @@ void renderer_init(void)
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    glCreateVertexArrays(1, &s_VAO);
-    glCreateBuffers(1, &s_VBO);
-    glCreateBuffers(1, &s_IBO);
+    glCreateVertexArrays(1, &s_vao);
+    glCreateBuffers(1, &s_vbo);
+    glCreateBuffers(1, &s_ibo);
 
-    glBindVertexArray(s_VAO);
-    glBindBuffer(GL_ARRAY_BUFFER, s_VBO);
+    glBindVertexArray(s_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, s_vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(QuadVertex) * MAX_VERTICES, NULL, GL_DYNAMIC_DRAW);
 
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_IBO);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, s_ibo);
 
     // Position
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(QuadVertex), (const void*)0);
@@ -95,12 +95,12 @@ void renderer_init(void)
     glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(QuadVertex), (const void*)(sizeof(float) * 8));
     glEnableVertexAttribArray(3);
 
-    bool result = create_shader_program(TEXT_VERT_SHADER, TEXT_FRAG_SHADER, &s_Shader);
+    bool result = create_shader_program(TEXT_VERT_SHADER, TEXT_FRAG_SHADER, &s_shader);
     GEM_ENSURE_MSG(result, "Failed to create text shader, exiting.");
-    glUseProgram(s_Shader);
+    glUseProgram(s_shader);
 
-    s_VertexData = malloc(MAX_VERTICES * sizeof(QuadVertex));
-    s_VertexInsert = s_VertexData;
+    s_vertex_data = malloc(MAX_VERTICES * sizeof(QuadVertex));
+    s_vertex_insert = s_vertex_data;
 
     {
         uint32_t indices[INDEX_COUNT];
@@ -117,57 +117,57 @@ void renderer_init(void)
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
     }
 
-    result = gen_font_atlas(DEFAULT_FONT, &s_Font);
+    result = gen_font_atlas(DEFAULT_FONT, &s_font);
     GEM_ENSURE_MSG(result, "Failed to create font atlas.");
-    glBindTextureUnit(0, s_Font.atlas_texture);
+    glBindTextureUnit(0, s_font.atlas_texture);
 
     uniforms_init();
 
-    s_TextColor     = hex_rgba_to_color(0xd2d2dfff);
-    s_BGColor       = hex_rgba_to_color(0x2d2d3dff);
-    s_SidebarColor  = hex_rgba_to_color(0x36364aff);
-    s_InactiveColor = hex_rgba_to_color(0x00000044); 
-    s_CursorColor   = hex_rgba_to_color(0xaaaaaaa0);
+    s_text_color     = hex_rgba_to_color(0xd2d2dfff);
+    s_bg_color       = hex_rgba_to_color(0x2d2d3dff);
+    s_sidebar_color  = hex_rgba_to_color(0x36364aff);
+    s_inactive_color = hex_rgba_to_color(0x00000044); 
+    s_cursor_color   = hex_rgba_to_color(0xaaaaaaa0);
 
     GEM_ENSURE_ARGS(result, "Failed to create font at path %s.", DEFAULT_FONT);
-    s_Initialized = true;
+    s_initialized = true;
 }
 
 void renderer_cleanup(void)
 {
-    if(s_Initialized)
+    if(s_initialized)
     {
-        s_Initialized = false;
-        free(s_VertexData);
+        s_initialized = false;
+        free(s_vertex_data);
         uniforms_cleanup();
-        glDeleteProgram(s_Shader);
-        glDeleteTextures(1, &s_Font.atlas_texture);
-        glDeleteBuffers(1, &s_VBO);
-        glDeleteBuffers(1, &s_IBO);
-        glDeleteVertexArrays(1, &s_VAO);
+        glDeleteProgram(s_shader);
+        glDeleteTextures(1, &s_font.atlas_texture);
+        glDeleteBuffers(1, &s_vbo);
+        glDeleteBuffers(1, &s_ibo);
+        glDeleteVertexArrays(1, &s_vao);
     }
 }
 
 void renderer_start_batch(void)
 {
-    s_VertexInsert = s_VertexData;
-    s_QuadCnt = 0;
-    s_Stats.draw_calls = 0;
-    s_Stats.quad_count = 0;
+    s_vertex_insert = s_vertex_data;
+    s_quad_cnt = 0;
+    s_stats.draw_calls = 0;
+    s_stats.quad_count = 0;
 }
 
 void renderer_render_batch(void)
 {
-    if(s_QuadCnt == 0)
+    if(s_quad_cnt == 0)
         return;
 
-    glBufferSubData(GL_ARRAY_BUFFER, 0, (uintptr_t)s_VertexInsert - (uintptr_t)s_VertexData, s_VertexData);
-    glDrawElements(GL_TRIANGLES, s_QuadCnt * 6, GL_UNSIGNED_INT, NULL);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, (uintptr_t)s_vertex_insert - (uintptr_t)s_vertex_data, s_vertex_data);
+    glDrawElements(GL_TRIANGLES, s_quad_cnt * 6, GL_UNSIGNED_INT, NULL);
 
-    s_Stats.quad_count += s_QuadCnt; // Add quad count of current batch to the total
-    s_Stats.draw_calls++;
-    s_VertexInsert = s_VertexData;
-    s_QuadCnt = 0;
+    s_stats.quad_count += s_quad_cnt; // Add quad count of current batch to the total
+    s_stats.draw_calls++;
+    s_vertex_insert = s_vertex_data;
+    s_quad_cnt = 0;
 }
 
 static const GemGlyphData* get_glyph_data_from_font(const GemFont* font, char c)
@@ -188,7 +188,7 @@ void renderer_draw_bufwin(const BufferWin* bufwin, bool active)
     const GemQuad* buf_bb = &bufwin->frame.bounding_box;
     
     // Draw background
-    draw_quad(buf_bb, NULL, s_BGColor, true);
+    draw_quad(buf_bb, NULL, s_bg_color, true);
 
     if(bufwin->mode == WIN_MODE_FILEMAN)
     {
@@ -196,7 +196,7 @@ void renderer_draw_bufwin(const BufferWin* bufwin, bool active)
     }
     else
     {
-        uint32_t num_pad = s_Font.advance / 4;
+        uint32_t num_pad = s_font.advance / 4;
 
         // Draw sidebar with line numbers
         vec2pos   pen;
@@ -204,19 +204,19 @@ void renderer_draw_bufwin(const BufferWin* bufwin, bool active)
 
         float vert_advance = get_vert_advance();
 
-        draw_quad(&bufwin->line_num_bb, NULL, s_SidebarColor, true);
+        draw_quad(&bufwin->line_num_bb, NULL, s_sidebar_color, true);
         for(int64_t line = 0; line < bufwin->view.count.line; ++line)
         {
             size_t cpy = line + 1 + bufwin->view.start.line;
-            pen.x = bufwin->line_num_bb.tr.x - s_Font.advance - num_pad;
+            pen.x = bufwin->line_num_bb.tr.x - s_font.advance - num_pad;
             if(cpy > pt->line_cnt)
-                draw_char('~', pen, s_TextColor);
+                draw_char('~', pen, s_text_color);
             else
             {
                 while(cpy > 0)
                 {
-                    draw_char('0' + cpy % 10, pen, s_TextColor);
-                    pen.x -= s_Font.advance;
+                    draw_char('0' + cpy % 10, pen, s_text_color);
+                    pen.x -= s_font.advance;
                     cpy /= 10;
                 }
             }
@@ -245,17 +245,17 @@ void renderer_draw_bufwin(const BufferWin* bufwin, bool active)
         draw_cursor(&bufwin->cursor, &bufwin->view, pen); 
     }
     if(!active)
-        draw_quad(buf_bb, NULL, s_InactiveColor, true);
+        draw_quad(buf_bb, NULL, s_inactive_color, true);
 }
 
 const GemFont* gem_get_font(void)
 {
-    return &s_Font;
+    return &s_font;
 }
 
 const GemRenderStats* renderer_get_stats(void)
 {
-    return &s_Stats;
+    return &s_stats;
 }
 
 static void draw_fileman(const BufferWin* bufwin)
@@ -264,14 +264,14 @@ static void draw_fileman(const BufferWin* bufwin)
         return;
 
     const GemQuad* frame_bb = &bufwin->frame.bounding_box;
-    GemQuad bb = make_quad(frame_bb->bl.x + s_Font.advance * 2,
+    GemQuad bb = make_quad(frame_bb->bl.x + s_font.advance * 2,
                            frame_bb->bl.y - bufwin->text_padding.bottom,
-                           frame_bb->tr.x - s_Font.advance * 2,
+                           frame_bb->tr.x - s_font.advance * 2,
                            frame_bb->tr.y + bufwin->text_padding.top);
 
     BufferPos pos = { 0, 0 };
     uint32_t vert_adv = get_vert_advance();
-    uint32_t hori_adv = s_Font.advance;
+    uint32_t hori_adv = s_font.advance;
 
     for(size_t i = 0; i < bufwin->dir_entries.size; ++i)
     {
@@ -284,7 +284,7 @@ static void draw_fileman(const BufferWin* bufwin)
                                   bb.tr.y + (i + 1) * vert_adv,
                                   bb.bl.x + len * hori_adv,
                                   bb.tr.y + i * vert_adv);
-            draw_quad(&q, NULL, s_CursorColor, true);
+            draw_quad(&q, NULL, s_cursor_color, true);
         }
         // pos.column = bufwin->dir_entries.largest_name + 2;
         // switch(bufwin->dir_entries.ents[i]->d_type)
@@ -311,14 +311,14 @@ static void draw_cursor(const Cursor* cur, const View* view, vec2pos top_left)
 
 
     int vert_adv = get_vert_advance();
-    int hori_adv = s_Font.advance;
+    int hori_adv = s_font.advance;
     int x = top_left.x + rel_col * hori_adv;
     int y = top_left.y + rel_line * vert_adv;
     GemQuad cursor_quad = make_quad(x, 
                                     y + vert_adv,
                                     x + hori_adv, 
                                     y);
-    draw_quad(&cursor_quad, NULL, s_CursorColor, true);
+    draw_quad(&cursor_quad, NULL, s_cursor_color, true);
 }
 
 
@@ -327,7 +327,7 @@ static void handle_str(const char* str, size_t count, const GemQuad* bounding_bo
                        const View* view, BufferPos* pos)
 {
     int vert_adv = get_vert_advance();
-    int hori_adv = s_Font.advance;
+    int hori_adv = s_font.advance;
     for(size_t i = 0; i < count && pos->line < view->count.line; ++i)
     {
         char c = str[i];
@@ -348,7 +348,7 @@ static void handle_str(const char* str, size_t count, const GemQuad* bounding_bo
                     bounding_box->bl.x + pos->column * hori_adv,
                     bounding_box->tr.y + pos->line * vert_adv
                 };
-                draw_char(c, loc, s_TextColor); 
+                draw_char(c, loc, s_text_color); 
             }
             pos->column++;
         }
@@ -357,7 +357,7 @@ static void handle_str(const char* str, size_t count, const GemQuad* bounding_bo
 
 static void draw_char(char c, vec2pos pos, vec4color color)
 {
-    const GemGlyphData* data = get_glyph_data_from_font(&s_Font, c);
+    const GemGlyphData* data = get_glyph_data_from_font(&s_font, c);
     pos.x += data->xoff;
     pos.y += get_font_size() - data->yoff;
     GemQuad char_quad = make_quad(pos.x,
@@ -372,7 +372,7 @@ static void draw_quad(const GemQuad* quad, const float tex[4], vec4color color, 
 {
     GEM_ASSERT(quad != NULL);
     GEM_ASSERT(is_solid || tex != NULL);
-    if(s_QuadCnt == MAX_QUADS)
+    if(s_quad_cnt == MAX_QUADS)
         renderer_render_batch();
 
     float positions[8] = { 
@@ -397,22 +397,22 @@ static void draw_quad(const GemQuad* quad, const float tex[4], vec4color color, 
 
     for(size_t i = 0; i < 4; ++i)
     {
-        s_VertexInsert[i].position[0] = positions[2 * i];
-        s_VertexInsert[i].position[1] = positions[2 * i + 1];
+        s_vertex_insert[i].position[0] = positions[2 * i];
+        s_vertex_insert[i].position[1] = positions[2 * i + 1];
         if(!is_solid)
         {
-            s_VertexInsert[i].tex_coords[0] = texc[2 * i];
-            s_VertexInsert[i].tex_coords[1] = texc[2 * i + 1];
+            s_vertex_insert[i].tex_coords[0] = texc[2 * i];
+            s_vertex_insert[i].tex_coords[1] = texc[2 * i + 1];
         }
-        s_VertexInsert[i].color.r = color.r;
-        s_VertexInsert[i].color.g = color.g;
-        s_VertexInsert[i].color.b = color.b;
-        s_VertexInsert[i].color.a = color.a;
-        s_VertexInsert[i].solid = (float)is_solid;
+        s_vertex_insert[i].color.r = color.r;
+        s_vertex_insert[i].color.g = color.g;
+        s_vertex_insert[i].color.b = color.b;
+        s_vertex_insert[i].color.a = color.a;
+        s_vertex_insert[i].solid = (float)is_solid;
     }
 
-    s_VertexInsert += 4;
-    s_QuadCnt++;
+    s_vertex_insert += 4;
+    s_quad_cnt++;
 }
 
 static bool create_shader_program(const char* vert_path, const char* frag_path, GLuint* program_id)

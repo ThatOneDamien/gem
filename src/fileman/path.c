@@ -151,3 +151,7 @@ void scan_bufwin_dir(BufferWin* bufwin)
     closedir(dir);
 }
 
+bool is_dir(DirEntry* ent)
+{
+    return S_ISDIR(ent->stats.st_mode);
+}
